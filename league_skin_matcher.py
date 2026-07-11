@@ -1004,9 +1004,10 @@ def find_team_comp(player_champs, champ_roles, mastery_by_player=None,
     player_champs: {player: champions they own in this line}
     champ_roles:   {champion: ordered roles, primary lane first} —
                    champions with no role data are treated as flexible.
-    role_prefs:    {player: (preferred_role, secondary_role)} — players
-                   are seated in their preferred role first, then their
-                   secondary, then wherever fits (issue #2).
+    role_prefs:    {player: roles in priority order (preferred first,
+                   then secondary, tertiary, ...)} — players are seated
+                   in their highest-priority role that fits before
+                   anything else is considered (issue #2).
     Returns {player: (champion, role)} or None. With 4 players one of
     the five roles is left uncovered. Prefers high-mastery champions on
     their primary lanes.
@@ -1021,7 +1022,7 @@ def find_team_comp(player_champs, champ_roles, mastery_by_player=None,
 
     def candidates(player):
         m = mastery_by_player.get(player, {})
-        pref, sec = role_prefs.get(player, (None, None))
+        prefs = tuple(r for r in (role_prefs.get(player) or ()) if r)
         combos = []
         for champ in player_champs[player]:
             if champ in used_champs:
@@ -1030,7 +1031,7 @@ def find_team_comp(player_champs, champ_roles, mastery_by_player=None,
             for idx, role in enumerate(roles):
                 if role in used_roles:
                     continue
-                rank = 0 if role == pref else (1 if role == sec else 2)
+                rank = prefs.index(role) if role in prefs else len(prefs)
                 # preference rank, then mastery, then the champion's own
                 # primary-lane ordering
                 combos.append((rank, -m.get(champ, 0), champ, idx, role))
@@ -1110,10 +1111,10 @@ GOOD TO KNOW
 - Own two accounts? "Merge Accounts..." pools their skins into one ⛓
   player (you can switch accounts as needed). ✕ on a merged chip just
   splits it apart — nothing is deleted.
-- The ⚙ on each player sets their preferred (and optional secondary)
-  role. The Team Builder seats people in their preferred role first,
-  then secondary, then wherever fits — ★/☆ in the details show when a
-  preference was honored.
+- The ⚙ on each player sets their preferred role, plus optional
+  secondary and tertiary. The Team Builder seats people in their
+  highest-priority role that fits, then wherever works — ★/☆/✩ in the
+  details show which preference was honored.
 - "me" marks your account — the mastery filter then narrows only you.
 - The Filter box matches skinlines AND champions (try "Lux").
 - Team Builder (4-5 ticked players): suggests a comp where everyone
@@ -1190,15 +1191,20 @@ def run_gui(preload=None, data_file=None):
              "chip_vars": {}, "chips": [], "chip_width": 0,
              "show_welcome": True,
              "merges": [],  # [{"name":…, "members":[player names]}]
-             # player -> {"preferred": role|None, "secondary": role|None}
+             # player -> {"preferred"/"secondary"/"tertiary": role|None}
              "role_prefs": {},
              "swatches": {}}  # color -> PhotoImage (kept to avoid GC)
 
+    PREF_KEYS = ("preferred", "secondary", "tertiary")
+
     def prefs_tuple_map():
-        """state["role_prefs"] as the {player: (pref, sec)} the solver wants."""
-        return {p: (d.get("preferred"), d.get("secondary"))
-                for p, d in state["role_prefs"].items()
-                if d.get("preferred") or d.get("secondary")}
+        """state["role_prefs"] as the {player: (roles…)} the solver wants."""
+        out = {}
+        for p, d in state["role_prefs"].items():
+            order = tuple(d.get(k) for k in PREF_KEYS if d.get(k))
+            if order:
+                out[p] = order
+        return out
 
     def display_libs():
         """Libraries as shown: merged accounts appear as ONE player."""
@@ -1506,30 +1512,26 @@ def run_gui(preload=None, data_file=None):
                                        sticky="w", pady=(0, 8))
         current = state["role_prefs"].get(name, {})
         none_label = "(no preference)"
-        pref_var = tk.StringVar(value=current.get("preferred")
-                                or none_label)
-        sec_var = tk.StringVar(value=current.get("secondary")
-                               or none_label)
-        ttk.Label(frame, text="Preferred role:").grid(row=1, column=0,
-                                                      sticky="w")
-        ttk.Combobox(frame, textvariable=pref_var, state="readonly",
-                     values=[none_label] + list(ROLES), width=16
-                     ).grid(row=1, column=1, sticky="w", pady=2)
-        ttk.Label(frame, text="Secondary role:").grid(row=2, column=0,
-                                                      sticky="w")
-        ttk.Combobox(frame, textvariable=sec_var, state="readonly",
-                     values=[none_label] + list(ROLES), width=16
-                     ).grid(row=2, column=1, sticky="w", pady=2)
+        pick_vars = []
+        for row_i, key in enumerate(PREF_KEYS, start=1):
+            var = tk.StringVar(value=current.get(key) or none_label)
+            pick_vars.append(var)
+            ttk.Label(frame, text=f"{key.capitalize()} role:"
+                      ).grid(row=row_i, column=0, sticky="w")
+            ttk.Combobox(frame, textvariable=var, state="readonly",
+                         values=[none_label] + list(ROLES), width=16
+                         ).grid(row=row_i, column=1, sticky="w", pady=2)
 
         def save_roles():
-            pref = pref_var.get()
-            sec = sec_var.get()
-            pref = pref if pref in ROLES else None
-            sec = sec if sec in ROLES and sec != pref else None
-            if pref or sec:
-                state["role_prefs"][name] = {"preferred": pref or sec,
-                                             "secondary": sec if pref
-                                             else None}
+            chosen = []
+            for var in pick_vars:
+                role = var.get()
+                if role in ROLES and role not in chosen:
+                    chosen.append(role)
+            if chosen:
+                state["role_prefs"][name] = {
+                    key: (chosen[i] if i < len(chosen) else None)
+                    for i, key in enumerate(PREF_KEYS)}
             else:
                 state["role_prefs"].pop(name, None)
             write_roster()
@@ -1538,7 +1540,8 @@ def run_gui(preload=None, data_file=None):
             win.destroy()
 
         btns = ttk.Frame(frame)
-        btns.grid(row=3, column=0, columnspan=2, pady=(12, 0))
+        btns.grid(row=len(PREF_KEYS) + 1, column=0, columnspan=2,
+                  pady=(12, 0))
         ttk.Button(btns, text="Save", command=save_roles
                    ).pack(side="left")
         ttk.Button(btns, text="Cancel", command=win.destroy
@@ -1549,13 +1552,9 @@ def run_gui(preload=None, data_file=None):
 
     def role_badge(name):
         d = state["role_prefs"].get(name) or {}
-        pref, sec = d.get("preferred"), d.get("secondary")
-        if not pref:
-            return ""
-        badge = ROLE_ABBR.get(pref, pref)
-        if sec:
-            badge += f"/{ROLE_ABBR.get(sec, sec)}"
-        return f"  [{badge}]"
+        parts = [ROLE_ABBR.get(d[k], d[k]) for k in PREF_KEYS
+                 if d.get(k)]
+        return f"  [{'/'.join(parts)}]" if parts else ""
 
     def refresh_players():
         for child in players_inner.winfo_children():
@@ -1853,11 +1852,11 @@ def run_gui(preload=None, data_file=None):
                     p, champ = by_role[role]
                     pts = mastery_by_player.get(p, {}).get(champ)
                     extra = f"  ({pts:,} mastery)" if pts else ""
-                    pref, sec = prefs.get(p, (None, None))
-                    if role == pref:
-                        extra += "  ★ preferred role"
-                    elif role == sec:
-                        extra += "  ☆ secondary role"
+                    prefs_p = prefs.get(p, ())
+                    if role in prefs_p:
+                        marks = ("★ preferred role", "☆ secondary role",
+                                 "✩ tertiary role")
+                        extra += f"  {marks[prefs_p.index(role)]}"
                     lines.append(f"    {role:<9} {p}  →  {champ}{extra}")
                 else:
                     lines.append(f"    {role:<9} (left empty)")
@@ -1956,14 +1955,19 @@ def run_gui(preload=None, data_file=None):
                                             "members": members})
                     state["enabled"][g["name"]] = bool(
                         g.get("enabled", True))
-            prefs = payload.get("role_prefs") or {}
-            state["role_prefs"] = {
-                name: {"preferred": d.get("preferred"),
-                       "secondary": d.get("secondary")}
-                for name, d in prefs.items()
-                if isinstance(d, dict)
-                and (d.get("preferred") in ROLES
-                     or d.get("secondary") in ROLES)}
+            state["role_prefs"] = {}
+            for name, d in (payload.get("role_prefs") or {}).items():
+                if not isinstance(d, dict):
+                    continue
+                order = []
+                for key in PREF_KEYS:
+                    role = d.get(key)
+                    if role in ROLES and role not in order:
+                        order.append(role)
+                if order:
+                    state["role_prefs"][name] = {
+                        key: (order[i] if i < len(order) else None)
+                        for i, key in enumerate(PREF_KEYS)}
             if state["merges"] or state["role_prefs"]:
                 refresh_players()
                 refresh_table()
@@ -2455,6 +2459,13 @@ def selftest(online=True):
                           role_prefs={"A": ("Support", None)})
     check("impossible preference still finds a comp",
           comp is not None and comp["A"] == ("Sett", "Top"))
+    comp = find_team_comp(
+        {"A": {"Lux"}, "T": {"Thresh"}, "B": {"Jinx"}},
+        {"Lux": ["Mid", "Support", "Top"], "Thresh": ["Support"],
+         "Jinx": ["Bot", "Mid"]},
+        role_prefs={"A": ("Support", "Bot", "Top")})
+    check("tertiary role honored when higher prefs don't fit",
+          comp is not None and comp["A"] == ("Lux", "Top"))
 
     print("== account merging ==")
     main_acc = Library("Main#1", [
