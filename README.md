@@ -2,7 +2,7 @@
 
 *Because we don't win unless it's in style.*
 
-**v1.0 — made by StallionPrime**
+**v1.1 — made by StallionPrime**
 
 Find the skinlines (High Noon, Pool Party, Star Guardian, …) that you and
 your friends can **all play at the same time on different champions** —

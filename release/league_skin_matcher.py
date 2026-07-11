@@ -27,7 +27,7 @@ Command line (optional):
     python league_skin_matcher.py --selftest   # run built-in logic tests
 """
 
-import argparse
+import argparse 
 import base64
 import json
 import os
@@ -43,7 +43,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 APP_NAME = "League Skin Matcher"
-APP_VERSION = "1.0"
+APP_VERSION = "1.1"
 APP_AUTHOR = "StallionPrime"
 EXPORT_APP_ID = "LeagueSkinMatcher"
 EXPORT_VERSION = 1
@@ -63,6 +63,8 @@ CACHE_FORMAT = 4  # bump when the cached game-data layout changes
 
 # ---- Team Maker: champion role (position) data --------------------------
 ROLES = ("Top", "Jungle", "Mid", "Bot", "Support")
+ROLE_ABBR = {"Top": "Top", "Jungle": "JG", "Mid": "Mid", "Bot": "Bot",
+             "Support": "Sup"}
 # Meraki Analytics publishes per-position play rates derived from Riot's
 # own position data; used to know which lanes a champion actually plays.
 MERAKI_RATES_URL = ("https://cdn.merakianalytics.com/riot/lol/resources/"
@@ -995,17 +997,22 @@ def build_rows(libraries, merge_seasons=True, top_mastery=None,
     return rows
 
 
-def find_team_comp(player_champs, champ_roles, mastery_by_player=None):
+def find_team_comp(player_champs, champ_roles, mastery_by_player=None,
+                   role_prefs=None):
     """Assign every player a DISTINCT champion in a DISTINCT role.
 
     player_champs: {player: champions they own in this line}
     champ_roles:   {champion: ordered roles, primary lane first} —
                    champions with no role data are treated as flexible.
+    role_prefs:    {player: (preferred_role, secondary_role)} — players
+                   are seated in their preferred role first, then their
+                   secondary, then wherever fits (issue #2).
     Returns {player: (champion, role)} or None. With 4 players one of
     the five roles is left uncovered. Prefers high-mastery champions on
     their primary lanes.
     """
     mastery_by_player = mastery_by_player or {}
+    role_prefs = role_prefs or {}
     players = sorted(player_champs,
                      key=lambda p: (len(player_champs[p]), p))
     used_champs = set()
@@ -1014,14 +1021,22 @@ def find_team_comp(player_champs, champ_roles, mastery_by_player=None):
 
     def candidates(player):
         m = mastery_by_player.get(player, {})
-        for champ in sorted(player_champs[player],
-                            key=lambda c: (-m.get(c, 0), c)):
+        pref, sec = role_prefs.get(player, (None, None))
+        combos = []
+        for champ in player_champs[player]:
             if champ in used_champs:
                 continue
-            # ordered: the champion's primary role is tried first
-            for role in (champ_roles.get(champ) or ROLES):
-                if role not in used_roles:
-                    yield champ, role
+            roles = champ_roles.get(champ) or ROLES
+            for idx, role in enumerate(roles):
+                if role in used_roles:
+                    continue
+                rank = 0 if role == pref else (1 if role == sec else 2)
+                # preference rank, then mastery, then the champion's own
+                # primary-lane ordering
+                combos.append((rank, -m.get(champ, 0), champ, idx, role))
+        combos.sort()
+        for _rank, _neg_mastery, champ, _idx, role in combos:
+            yield champ, role
 
     def solve(i):
         if i == len(players):
@@ -1042,7 +1057,7 @@ def find_team_comp(player_champs, champ_roles, mastery_by_player=None):
 
 
 def build_team_rows(libraries, champ_roles, merge_seasons=True,
-                    top_mastery=None, mastery_scope=None):
+                    top_mastery=None, mastery_scope=None, role_prefs=None):
     """One row per skinline that ALL players own.
 
     Each row carries a best suggested comp plus role_pools: for every
@@ -1057,7 +1072,8 @@ def build_team_rows(libraries, champ_roles, merge_seasons=True,
     for line, per_player in matrix.items():
         if len(per_player) != total:
             continue
-        comp = find_team_comp(per_player, champ_roles, mastery_by_player)
+        comp = find_team_comp(per_player, champ_roles, mastery_by_player,
+                              role_prefs)
         role_pools = {}
         for player, champs in per_player.items():
             m = mastery_by_player.get(player, {})
@@ -1094,6 +1110,10 @@ GOOD TO KNOW
 - Own two accounts? "Merge Accounts..." pools their skins into one ⛓
   player (you can switch accounts as needed). ✕ on a merged chip just
   splits it apart — nothing is deleted.
+- The ⚙ on each player sets their preferred (and optional secondary)
+  role. The Team Builder seats people in their preferred role first,
+  then secondary, then wherever fits — ★/☆ in the details show when a
+  preference was honored.
 - "me" marks your account — the mastery filter then narrows only you.
 - The Filter box matches skinlines AND champions (try "Lux").
 - Team Builder (4-5 ticked players): suggests a comp where everyone
@@ -1170,7 +1190,15 @@ def run_gui(preload=None, data_file=None):
              "chip_vars": {}, "chips": [], "chip_width": 0,
              "show_welcome": True,
              "merges": [],  # [{"name":…, "members":[player names]}]
+             # player -> {"preferred": role|None, "secondary": role|None}
+             "role_prefs": {},
              "swatches": {}}  # color -> PhotoImage (kept to avoid GC)
+
+    def prefs_tuple_map():
+        """state["role_prefs"] as the {player: (pref, sec)} the solver wants."""
+        return {p: (d.get("preferred"), d.get("secondary"))
+                for p, d in state["role_prefs"].items()
+                if d.get("preferred") or d.get("secondary")}
 
     def display_libs():
         """Libraries as shown: merged accounts appear as ONE player."""
@@ -1381,6 +1409,7 @@ def run_gui(preload=None, data_file=None):
         state["raw"].pop(name, None)
         state["enabled"].pop(name, None)
         state["chip_vars"].pop(name, None)
+        state["role_prefs"].pop(name, None)
         if state["my_account"] == name:
             state["my_account"] = None
             me_var.set("")
@@ -1451,6 +1480,7 @@ def run_gui(preload=None, data_file=None):
                            if g["name"] != name]
         state["enabled"].pop(name, None)
         state["chip_vars"].pop(name, None)
+        state["role_prefs"].pop(name, None)
         if state["my_account"] == name:
             state["my_account"] = None
             me_var.set("")
@@ -1460,6 +1490,72 @@ def run_gui(preload=None, data_file=None):
         refresh_table()
         set_status(f'Split "{name}" back into separate profiles '
                    "(no data was deleted).")
+
+    def edit_roles(name):
+        """Small dialog: preferred + optional secondary role (issue #2)."""
+        win = tk.Toplevel(root)
+        win.title(f"Roles — {name}")
+        win.transient(root)
+        win.grab_set()
+        win.resizable(False, False)
+        frame = ttk.Frame(win, padding=14)
+        frame.pack(fill="both", expand=True)
+        ttk.Label(frame, text=f"Where does {name} want to play?\n"
+                              "The Team Builder seats them there first.",
+                  justify="left").grid(row=0, column=0, columnspan=2,
+                                       sticky="w", pady=(0, 8))
+        current = state["role_prefs"].get(name, {})
+        none_label = "(no preference)"
+        pref_var = tk.StringVar(value=current.get("preferred")
+                                or none_label)
+        sec_var = tk.StringVar(value=current.get("secondary")
+                               or none_label)
+        ttk.Label(frame, text="Preferred role:").grid(row=1, column=0,
+                                                      sticky="w")
+        ttk.Combobox(frame, textvariable=pref_var, state="readonly",
+                     values=[none_label] + list(ROLES), width=16
+                     ).grid(row=1, column=1, sticky="w", pady=2)
+        ttk.Label(frame, text="Secondary role:").grid(row=2, column=0,
+                                                      sticky="w")
+        ttk.Combobox(frame, textvariable=sec_var, state="readonly",
+                     values=[none_label] + list(ROLES), width=16
+                     ).grid(row=2, column=1, sticky="w", pady=2)
+
+        def save_roles():
+            pref = pref_var.get()
+            sec = sec_var.get()
+            pref = pref if pref in ROLES else None
+            sec = sec if sec in ROLES and sec != pref else None
+            if pref or sec:
+                state["role_prefs"][name] = {"preferred": pref or sec,
+                                             "secondary": sec if pref
+                                             else None}
+            else:
+                state["role_prefs"].pop(name, None)
+            write_roster()
+            refresh_players()
+            refresh_table()
+            win.destroy()
+
+        btns = ttk.Frame(frame)
+        btns.grid(row=3, column=0, columnspan=2, pady=(12, 0))
+        ttk.Button(btns, text="Save", command=save_roles
+                   ).pack(side="left")
+        ttk.Button(btns, text="Cancel", command=win.destroy
+                   ).pack(side="left", padx=8)
+        win.update_idletasks()
+        win.geometry(f"+{root.winfo_rootx() + 200}"
+                     f"+{root.winfo_rooty() + 150}")
+
+    def role_badge(name):
+        d = state["role_prefs"].get(name) or {}
+        pref, sec = d.get("preferred"), d.get("secondary")
+        if not pref:
+            return ""
+        badge = ROLE_ABBR.get(pref, pref)
+        if sec:
+            badge += f"/{ROLE_ABBR.get(sec, sec)}"
+        return f"  [{badge}]"
 
     def refresh_players():
         for child in players_inner.winfo_children():
@@ -1488,13 +1584,20 @@ def run_gui(preload=None, data_file=None):
             marker = "⛓ " if is_merged else ""
             tk.Checkbutton(
                 chip,
-                text=f"{marker}{lib.player} — {len(lib.records)} skins",
+                text=f"{marker}{lib.player} — {len(lib.records)} skins"
+                     f"{role_badge(lib.player)}",
                 variable=var,
                 command=lambda n=lib.player: toggle_player(n),
                 background=bg, activebackground=bg,
                 highlightthickness=0, bd=0,
                 font=("Segoe UI", 9, "bold"),
             ).pack(side="left", padx=(6, 0), pady=3)
+            tk.Button(chip, text="⚙",
+                      command=lambda n=lib.player: edit_roles(n),
+                      background=bg, activebackground=bg,
+                      relief="flat", bd=0, padx=4,
+                      font=("Segoe UI", 9),
+                      ).pack(side="left", padx=(2, 0), pady=1)
             close_cmd = (lambda n=lib.player: unmerge(n)) if is_merged \
                 else (lambda n=lib.player: remove_player(n))
             tk.Button(chip, text="✕", command=close_cmd,
@@ -1656,10 +1759,12 @@ def run_gui(preload=None, data_file=None):
                 "group can queue up with a different champion in a "
                 "different role (Top / Jungle / Mid / Bot / Support).")
             return
+        role_prefs = prefs_tuple_map()
         rows = build_team_rows(libs, state["gamedata"].champ_positions,
                                merge_seasons=merge_var.get(),
                                top_mastery=current_top_mastery(),
-                               mastery_scope=state["my_account"])
+                               mastery_scope=state["my_account"],
+                               role_prefs=role_prefs)
 
         def comp_values(comp):
             by_role = {role: (p, champ)
@@ -1695,7 +1800,7 @@ def run_gui(preload=None, data_file=None):
                     pinned_pool = dict(row["per_player"])
                     pinned_pool[player] = [champ]
                     comp = find_team_comp(pinned_pool, gd_roles,
-                                          mastery_by_player)
+                                          mastery_by_player, role_prefs)
                     if comp:
                         break
             emoji, color = style_for(row["line"])
@@ -1739,6 +1844,7 @@ def run_gui(preload=None, data_file=None):
         mastery_by_player = {l.player: l.mastery for l in active_libs()}
         lines = [f"{style_for(row['line'])[0]} {row['line']}"]
         if comp:
+            prefs = prefs_tuple_map()
             lines.append("This option:")
             by_role = {role: (p, c)
                        for p, (c, role) in comp.items()}
@@ -1747,6 +1853,11 @@ def run_gui(preload=None, data_file=None):
                     p, champ = by_role[role]
                     pts = mastery_by_player.get(p, {}).get(champ)
                     extra = f"  ({pts:,} mastery)" if pts else ""
+                    pref, sec = prefs.get(p, (None, None))
+                    if role == pref:
+                        extra += "  ★ preferred role"
+                    elif role == sec:
+                        extra += "  ☆ secondary role"
                     lines.append(f"    {role:<9} {p}  →  {champ}{extra}")
                 else:
                     lines.append(f"    {role:<9} (left empty)")
@@ -1783,6 +1894,7 @@ def run_gui(preload=None, data_file=None):
                             "enabled": bool(state["enabled"].get(
                                 g["name"], True))}
                            for g in state["merges"]],
+                       "role_prefs": state["role_prefs"],
                        "friends": [
                 {"name": lib.player, "data": state["raw"][lib.player],
                  "enabled": bool(state["enabled"].get(lib.player, True))}
@@ -1844,7 +1956,15 @@ def run_gui(preload=None, data_file=None):
                                             "members": members})
                     state["enabled"][g["name"]] = bool(
                         g.get("enabled", True))
-            if state["merges"]:
+            prefs = payload.get("role_prefs") or {}
+            state["role_prefs"] = {
+                name: {"preferred": d.get("preferred"),
+                       "secondary": d.get("secondary")}
+                for name, d in prefs.items()
+                if isinstance(d, dict)
+                and (d.get("preferred") in ROLES
+                     or d.get("secondary") in ROLES)}
+            if state["merges"] or state["role_prefs"]:
                 refresh_players()
                 refresh_table()
             mine = payload.get("my_account")
@@ -2314,6 +2434,27 @@ def selftest(online=True):
           trows[0]["role_pools"]["P1"]["Mid"] == ["Lux"]
           and trows[0]["role_pools"]["P1"]["Top"] == []
           and trows[0]["role_pools"]["P2"]["Bot"] == ["Jinx"])
+
+    print("== role preferences (issue #2) ==")
+    pref_roles = {"Lux": ["Mid", "Support"], "Jinx": ["Bot", "Mid"],
+                  "Thresh": ["Support"], "Sett": ["Top"]}
+    comp = find_team_comp({"A": {"Lux"}, "B": {"Jinx"}}, pref_roles,
+                          role_prefs={"A": ("Support", None)})
+    check("preferred role beats champ's primary lane",
+          comp is not None and comp["A"] == ("Lux", "Support"))
+    comp = find_team_comp({"A": {"Lux"}, "T": {"Thresh"}}, pref_roles,
+                          role_prefs={"A": ("Support", "Mid")})
+    check("falls back to secondary when preferred is contested",
+          comp is not None and comp["A"] == ("Lux", "Mid")
+          and comp["T"] == ("Thresh", "Support"))
+    comp = find_team_comp({"A": {"Lux"}, "B": {"Jinx"}}, pref_roles)
+    check("no preference keeps old behavior",
+          comp is not None and comp["A"] == ("Lux", "Mid")
+          and comp["B"] == ("Jinx", "Bot"))
+    comp = find_team_comp({"A": {"Sett"}, "B": {"Jinx"}}, pref_roles,
+                          role_prefs={"A": ("Support", None)})
+    check("impossible preference still finds a comp",
+          comp is not None and comp["A"] == ("Sett", "Top"))
 
     print("== account merging ==")
     main_acc = Library("Main#1", [
