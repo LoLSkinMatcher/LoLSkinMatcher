@@ -7,3 +7,4 @@ dist/
 .claude/
 # real Firebase config (copy from the .example files)
 firebase_config.json
+.firebase/
