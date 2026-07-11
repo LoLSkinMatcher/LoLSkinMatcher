@@ -43,7 +43,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 APP_NAME = "League Skin Matcher"
-APP_VERSION = "1.1"
+APP_VERSION = "1.2"
 APP_AUTHOR = "StallionPrime"
 EXPORT_APP_ID = "LeagueSkinMatcher"
 EXPORT_VERSION = 1
@@ -57,6 +57,10 @@ CACHE_MAX_AGE_DAYS = 7
 
 # Added friends are remembered here between sessions (auto-saved/loaded).
 DATA_FILE = Path.home() / ".league_skin_matcher_friends.json"
+
+# Champion square icons (shown next to champion names in the detail
+# panes) are downloaded once from CommunityDragon and cached here.
+ICON_CACHE_DIR = Path.home() / ".league_skin_matcher_icons"
 
 MAX_PLAYERS = 5  # the comparison is built for one five-stack
 CACHE_FORMAT = 4  # bump when the cached game-data layout changes
@@ -508,6 +512,8 @@ class GameData:
                  champ_positions=None):
         self.skinline_names = skinline_names  # {int: str}
         self.champ_names = champ_names        # {int: str}
+        self.champ_ids = {name: cid           # {str: int} reverse lookup
+                          for cid, name in champ_names.items()}
         self.skins = skins                    # {int: (name, [skinline ids])}
         # {champion name: set of ROLES they can play}
         self.champ_positions = champ_positions or {}
@@ -600,6 +606,21 @@ def fetch_game_data(status=lambda msg: None):
             for s in skins.values() if not s.get("isBase")
         },
     }
+
+
+def fetch_champion_icon(champ_id, cache_dir=ICON_CACHE_DIR):
+    """Download one champion square icon (cached); returns the file path."""
+    cache_dir.mkdir(exist_ok=True)
+    path = cache_dir / f"{champ_id}.png"
+    if path.is_file() and path.stat().st_size > 0:
+        return path
+    req = urllib.request.Request(
+        f"{CDRAGON_BASE}/champion-icons/{champ_id}.png",
+        headers={"User-Agent": f"{EXPORT_APP_ID}/{EXPORT_VERSION}"})
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        data = resp.read()
+    path.write_bytes(data)
+    return path
 
 
 def load_game_data(status=lambda msg: None, force_refresh=False):
@@ -1122,6 +1143,8 @@ GOOD TO KNOW
   to see, per player, which of their champions fit each role. "Must
   include champion" (or the Talon button) keeps only lines where
   someone owns that champion and works them into the suggestion.
+- Champion icons appear next to names in the detail panes (downloaded
+  once from CommunityDragon on first run, then cached).
 - Rek'Sai plays everywhere.
 
 Nothing is uploaded anywhere — everything stays on your PC.
@@ -1193,6 +1216,8 @@ def run_gui(preload=None, data_file=None):
              "merges": [],  # [{"name":…, "members":[player names]}]
              # player -> {"preferred"/"secondary"/"tertiary": role|None}
              "role_prefs": {},
+             "champ_icons": {},  # champ id -> PhotoImage (kept alive)
+             "detail_tokens": [], "team_detail_tokens": [],
              "swatches": {}}  # color -> PhotoImage (kept to avoid GC)
 
     PREF_KEYS = ("preferred", "secondary", "tertiary")
@@ -1388,17 +1413,52 @@ def run_gui(preload=None, data_file=None):
     def set_status(msg):
         status_var.set(msg)
 
-    def set_detail(text):
-        detail.configure(state="normal")
-        detail.delete("1.0", "end")
-        detail.insert("1.0", text)
-        detail.configure(state="disabled")
+    def champ_icon(champ_name):
+        """A small cached PhotoImage of the champion's square icon, or
+        None (icon not downloaded yet / unknown champion)."""
+        gd = state["gamedata"]
+        if gd is None:
+            return None
+        cid = gd.champ_ids.get(champ_name)
+        if cid is None:
+            return None
+        if cid in state["champ_icons"]:
+            return state["champ_icons"][cid]
+        path = ICON_CACHE_DIR / f"{cid}.png"
+        if not path.is_file():
+            return None
+        try:
+            raw = tk.PhotoImage(file=str(path))
+            factor = max(1, raw.width() // max(16, px(20)))
+            img = raw.subsample(factor, factor) if factor > 1 else raw
+        except Exception:
+            return None
+        state["champ_icons"][cid] = img
+        return img
 
-    def set_team_detail(text):
-        team_detail.configure(state="normal")
-        team_detail.delete("1.0", "end")
-        team_detail.insert("1.0", text)
-        team_detail.configure(state="disabled")
+    def render_tokens(widget, tokens):
+        """Fill a Text widget from a token list: plain strings, or
+        ("icon", champ_name) markers that become inline champion icons."""
+        widget.configure(state="normal")
+        widget.delete("1.0", "end")
+        for tok in tokens:
+            if isinstance(tok, str):
+                widget.insert("end", tok)
+            else:
+                img = champ_icon(tok[1])
+                if img is not None:
+                    widget.image_create("end", image=img, padx=1)
+        widget.configure(state="disabled")
+
+    def set_detail(content):
+        state["detail_tokens"] = [content] if isinstance(content, str) \
+            else content
+        render_tokens(detail, state["detail_tokens"])
+
+    def set_team_detail(content):
+        state["team_detail_tokens"] = [content] \
+            if isinstance(content, str) else content
+        render_tokens(team_detail, state["team_detail_tokens"])
 
     def current_top_mastery():
         if not mastery_on_var.get():
@@ -1706,30 +1766,38 @@ def run_gui(preload=None, data_file=None):
             pts = mastery_by_player.get(player, {}).get(champ)
             return f"{champ} ({pts:,} mastery)" if pts else champ
 
-        lines = [f"{style_for(row['line'])[0]} {row['line']}"]
+        tokens = [f"{style_for(row['line'])[0]} {row['line']}\n"]
         if row["full"]:
-            lines.append("Everyone can play it! Suggested lineup:")
+            tokens.append("Everyone can play it! Suggested lineup:\n")
             for player, champ in sorted(row["assignment"].items()):
-                lines.append(f"    {player}  →  {champ_label(player, champ)}")
+                tokens.append(f"    {player}  →  ")
+                tokens.append(("icon", champ))
+                tokens.append(f" {champ_label(player, champ)}\n")
         elif row["clash"]:
-            lines.append("Everyone owns this line, but not on enough "
-                         "different champions — no way for all of you to "
-                         "play it at the same time without sharing a pick.")
+            tokens.append("Everyone owns this line, but not on enough "
+                          "different champions — no way for all of you to "
+                          "play it at the same time without sharing a "
+                          "pick.\n")
         else:
             missing = [l.player for l in libs
                        if l.player not in row["per_player"]]
-            lines.append(f"Owned by {row['have']} of {row['total']} players. "
-                         f"Missing: {', '.join(missing)}")
-        lines.append("")
+            tokens.append(f"Owned by {row['have']} of {row['total']} "
+                          f"players. Missing: {', '.join(missing)}\n")
+        tokens.append("\n")
         for lib in libs:
             champs = sorted(row["per_player"].get(lib.player, ()),
                             key=lambda c: (-lib.mastery.get(c, 0), c))
             if champs:
-                labeled = [champ_label(lib.player, c) for c in champs]
-                lines.append(f"{lib.player}: {', '.join(labeled)}")
+                tokens.append(f"{lib.player}: ")
+                for i, champ in enumerate(champs):
+                    if i:
+                        tokens.append(",  ")
+                    tokens.append(("icon", champ))
+                    tokens.append(f" {champ_label(lib.player, champ)}")
+                tokens.append("\n")
             else:
-                lines.append(f"{lib.player}: (none)")
-        set_detail("\n".join(lines))
+                tokens.append(f"{lib.player}: (none)\n")
+        set_detail(tokens)
 
     tree.bind("<<TreeviewSelect>>", on_select)
 
@@ -1841,10 +1909,10 @@ def run_gui(preload=None, data_file=None):
         row, comp = entry
         gd = state["gamedata"]
         mastery_by_player = {l.player: l.mastery for l in active_libs()}
-        lines = [f"{style_for(row['line'])[0]} {row['line']}"]
+        tokens = [f"{style_for(row['line'])[0]} {row['line']}\n"]
         if comp:
             prefs = prefs_tuple_map()
-            lines.append("This option:")
+            tokens.append("This option:\n")
             by_role = {role: (p, c)
                        for p, (c, role) in comp.items()}
             for role in ROLES:
@@ -1857,23 +1925,31 @@ def run_gui(preload=None, data_file=None):
                         marks = ("★ preferred role", "☆ secondary role",
                                  "✩ tertiary role")
                         extra += f"  {marks[prefs_p.index(role)]}"
-                    lines.append(f"    {role:<9} {p}  →  {champ}{extra}")
+                    tokens.append(f"    {role:<9} {p}  →  ")
+                    tokens.append(("icon", champ))
+                    tokens.append(f" {champ}{extra}\n")
                 else:
-                    lines.append(f"    {role:<9} (left empty)")
+                    tokens.append(f"    {role:<9} (left empty)\n")
         else:
-            lines.append("Everyone owns this line, but there's no way to "
-                         "give each player a different champion in a "
-                         "different role.")
-        lines.append("")
-        lines.append("Champion pools (playable roles):")
+            tokens.append("Everyone owns this line, but there's no way to "
+                          "give each player a different champion in a "
+                          "different role.\n")
+        tokens.append("\nChampion pools (playable roles):\n")
         for lib in active_libs():
-            parts = []
-            for champ in sorted(row["per_player"].get(lib.player, ())):
-                roles = (gd.champ_positions.get(champ) if gd else None) \
-                    or ROLES
-                parts.append(f"{champ} [{'/'.join(roles)}]")
-            lines.append(f"{lib.player}: {', '.join(parts) or '(none)'}")
-        set_team_detail("\n".join(lines))
+            champs = sorted(row["per_player"].get(lib.player, ()))
+            if champs:
+                tokens.append(f"{lib.player}: ")
+                for i, champ in enumerate(champs):
+                    if i:
+                        tokens.append(",  ")
+                    roles = (gd.champ_positions.get(champ) if gd else None) \
+                        or ROLES
+                    tokens.append(("icon", champ))
+                    tokens.append(f" {champ} [{'/'.join(roles)}]")
+                tokens.append("\n")
+            else:
+                tokens.append(f"{lib.player}: (none)\n")
+        set_team_detail(tokens)
 
     team_tree.bind("<<TreeviewSelect>>", on_team_select)
 
@@ -2183,6 +2259,19 @@ def run_gui(preload=None, data_file=None):
 
     threading.Thread(target=data_worker, daemon=True).start()
 
+    def icons_worker(gd):
+        """Fetch any champion icons missing from the disk cache."""
+        fetched = 0
+        for cid in gd.champ_names:
+            try:
+                path = ICON_CACHE_DIR / f"{cid}.png"
+                if not path.is_file():
+                    fetch_champion_icon(cid)
+                    fetched += 1
+            except Exception:
+                pass  # icons are cosmetic; keep going
+        events.put(("icons_ready", fetched))
+
     def poll_events():
         try:
             while True:
@@ -2192,6 +2281,8 @@ def run_gui(preload=None, data_file=None):
                 elif kind == "gamedata":
                     state["gamedata"] = payload
                     btn_export.configure(state="normal")
+                    threading.Thread(target=icons_worker, args=(payload,),
+                                     daemon=True).start()
                     # re-resolve any libraries loaded before data arrived
                     if state["raw"]:
                         order = [l.player for l in state["libraries"]]
@@ -2208,6 +2299,14 @@ def run_gui(preload=None, data_file=None):
                 elif kind == "data_err":
                     set_status("Couldn't load skinline data.")
                     messagebox.showerror(APP_NAME, payload, parent=root)
+                elif kind == "icons_ready":
+                    if payload:
+                        set_status(f"Downloaded {payload} champion "
+                                   "icon(s).")
+                    # re-render the visible details with icons in place
+                    render_tokens(detail, state["detail_tokens"])
+                    render_tokens(team_detail,
+                                  state["team_detail_tokens"])
                 elif kind == "export_ok":
                     finish_export(payload)
                 elif kind == "export_err":
@@ -2346,6 +2445,7 @@ def selftest(online=True):
     lib = parse_library(json.loads(json.dumps(export)), gd)
     check("round trip player", lib.player == "Tester#NA1")
     check("round trip champion", lib.records[0]["champion"] == "Lucian")
+    check("champion id reverse lookup", gd.champ_ids["Lucian"] == 236)
 
     lib2 = Library("Friend#EUW", [
         {"id": 21015, "name": "Pool Party Miss Fortune",
@@ -2522,6 +2622,10 @@ def selftest(online=True):
         yone = set(gd_live.champ_positions.get("Yone", []))
         check("Yone flexes top/mid/bot",
               {"Top", "Mid", "Bot"} <= yone)
+        icon_path = fetch_champion_icon(1)  # Annie
+        icon_bytes = icon_path.read_bytes()
+        check("champion icon downloads as PNG",
+              len(icon_bytes) > 500 and icon_bytes[:4] == b"\x89PNG")
         print("== LCU detection (client may not be running) ==")
         lcu = find_lcu()
         print(f"      League client {'FOUND on port ' + str(lcu.port) if lcu else 'not running — skipping live export test'}")
