@@ -148,8 +148,23 @@ if (params.get("demo")) {
   });
 } else {
   $("#phase").textContent = "no party";
+  $("#party-section").hidden = true;
   $("#empty").hidden = false;
-  $("#empty").textContent =
-    "Open this page from the link the captain's agent prints " +
-    "(…?party=CODE), or add ?demo=1 to preview.";
+  $("#empty").innerHTML = `
+    <div class="howto">
+      <h3>How this works</h3>
+      <ol>
+        <li><b>Everyone, once:</b> open the League client and run the
+          uploader — your skin library syncs automatically. Re-run it
+          when you buy skins.</li>
+        <li><b>The captain, each session:</b> run the agent in watch
+          mode before queueing. It prints this page's link with your
+          party code.</li>
+        <li><b>Everyone:</b> open that link. This page follows your
+          lobby and champ select live — bans and enemy picks update
+          the comps in real time.</li>
+      </ol>
+      <p class="hint">Want a preview right now? <a href="?demo=1">See
+      the demo</a>.</p>
+    </div>`;
 }

@@ -38,7 +38,18 @@ from pathlib import Path
 
 import league_skin_matcher as lsm
 
-CONFIG_PATH = Path(__file__).with_name("firebase_config.json")
+# watch mode is often run with output redirected; keep prints live
+try:
+    sys.stdout.reconfigure(line_buffering=True)
+except Exception:
+    pass
+
+# the config may sit next to this script or at the repo root
+_CONFIG_CANDIDATES = [Path(__file__).with_name("firebase_config.json"),
+                      Path(__file__).parent.parent
+                      / "firebase_config.json"]
+CONFIG_PATH = next((p for p in _CONFIG_CANDIDATES if p.is_file()),
+                   _CONFIG_CANDIDATES[0])
 AUTH_CACHE = Path.home() / ".lsm_agent_auth.json"
 POLL_SECONDS = 3
 MAX_SUGGESTIONS = 12
