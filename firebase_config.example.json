@@ -1,0 +1,5 @@
+{
+  "apiKey": "PASTE_YOUR_FIREBASE_WEB_API_KEY",
+  "projectId": "PASTE_YOUR_PROJECT_ID",
+  "webUrl": "https://PASTE_YOUR_PROJECT.web.app"
+}

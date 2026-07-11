@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LoLSkinMatcher — Party</title>
+<link rel="stylesheet" href="style.css">
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script src="config.js"></script>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <span class="logo">⟁</span>
+    <div>
+      <h1>LoLSkinMatcher</h1>
+      <p class="tag">Because we don't win unless it's in style.</p>
+    </div>
+  </div>
+  <div id="phase" class="phase">connecting…</div>
+</header>
+
+<main>
+  <section id="party-section">
+    <h2>Party</h2>
+    <div id="members" class="chips"></div>
+  </section>
+
+  <section id="draft-section" hidden>
+    <h2>Draft</h2>
+    <div class="draft-row"><span class="label">Bans</span><div id="bans" class="portraits"></div></div>
+    <div class="draft-row"><span class="label">Enemy picks</span><div id="enemy" class="portraits"></div></div>
+  </section>
+
+  <section>
+    <h2>Skinline comps you can still play</h2>
+    <div id="cards" class="cards"></div>
+    <p id="empty" class="empty" hidden>Waiting for the captain's agent…</p>
+  </section>
+</main>
+
+<footer>
+  <span id="status">·</span>
+</footer>
+
+<script src="app.js"></script>
+</body>
+</html>
