@@ -8,3 +8,5 @@ dist/
 # real Firebase config (copy from the .example files)
 firebase_config.json
 .firebase/
+# personal, local-only tools (account switcher, etc.) — never shared
+personal/

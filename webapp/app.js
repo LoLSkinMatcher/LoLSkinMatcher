@@ -218,14 +218,21 @@ function render(state, keepStamp) {
   const ROLE_SHORT = { Top: "Top", Jungle: "JG", Mid: "Mid", Bot: "Bot",
                        Support: "Sup" };
 
-  suggestions.forEach((sug) => {
+  const shortName = (n) => (n || "").split("#")[0];
+
+  function renderCard(sug) {
     // banner reflects the suggested comp's first pick, so it matches
     // who's actually being played
     const feature = sug.comp && sug.comp[0] && sug.comp[0].champ;
-    const { card, body, banner } = makeCard(sug.line, sug.color, "", feature);
-    // a full five-stack may only manage a 4/5 comp (one player off theme) —
-    // flag it as a positive, not the old red "no full comp"
-    if (sug.total && sug.seated && sug.seated < sug.total) {
+    const isSwitch = sug.access === "switch";
+    const { card, body, banner } = makeCard(
+      sug.line, sug.color, isSwitch ? "needs-switch" : "", feature);
+    if (isSwitch) {
+      // lobby only: only fieldable if this member hops to another account
+      banner.append(el("span", "banner-badge switch-badge",
+        `⚡ switch to ${shortName(sug.switchTo)}`));
+    } else if (sug.total && sug.seated && sug.seated < sug.total) {
+      // a full five-stack may only manage a 4/5 comp (one player off theme)
       banner.append(el("span", "banner-badge",
         `${sug.seated}/${sug.total} can style`));
     }
@@ -276,8 +283,24 @@ function render(state, keepStamp) {
         body.append(row);
       });
     }
-    cards.append(card);
-  });
+    return card;
+  }
+
+  // "current account" comps first; the ones that need a quick account
+  // switch are grouped under their own heading (lobby only — champ select
+  // never sends switch cards, so it stays locked to the live account).
+  const currentCards = suggestions.filter((s) => s.access !== "switch");
+  const switchCards = suggestions.filter((s) => s.access === "switch");
+  currentCards.forEach((s) => cards.append(renderCard(s)));
+  if (switchCards.length) {
+    const divider = el("div", "switch-divider");
+    divider.append(el("span", "switch-divider-title",
+      "⚡ Playable with a ~15s account switch"));
+    divider.append(el("span", "switch-divider-note",
+      "one teammate swaps accounts — everyone else stays put"));
+    cards.append(divider);
+    switchCards.forEach((s) => cards.append(renderCard(s)));
+  }
 
   setStatus(state, keepStamp);
 }
@@ -318,21 +341,16 @@ function demoGrid(players, comp, extra) {
 /* ---------------- demo mode ---------------- */
 
 const DEMO = {
-  phase: "champ select",
+  phase: "lobby",
   members: [
     { name: "Jhin Blossoms#Jhin" }, { name: "POG Fennel#68419" },
     { name: "RubixQber#ayaya" }, { name: "aesuki#sushi" },
     { name: "StallionPrime#9125" },
   ],
-  missing: ["aesuki#sushi"],
-  pinned: { "POG Fennel#68419": "Talon" },
-  bans: [
-    { champ: "Yasuo", champId: 157 }, { champ: "Zed", champId: 238 },
-    { champ: "Blitzcrank", champId: 53 },
-  ],
-  enemyPicks: [
-    { champ: "Jinx", champId: 222 }, { champ: "Thresh", champId: 412 },
-  ],
+  missing: [],
+  pinned: {},
+  bans: [],
+  enemyPicks: [],
   suggestions: [],  // filled in below
 };
 
@@ -347,7 +365,8 @@ DEMO.suggestions = [
       { role: "Support", player: "aesuki#sushi", champ: "Elise", champId: 60 },
     ];
     return {
-      line: "Blood Moon", emoji: "👹", color: "#922b21", ok: true, comp,
+      line: "Blood Moon", emoji: "👹", color: "#922b21", ok: true,
+      access: "current", comp,
       grid: demoGrid(DEMO_PLAYERS, comp, {
         "StallionPrime#9125": [{ role: "Mid", champ: "Diana", champId: 131 },
                                { role: "Jungle", champ: "Rek'Sai", champId: 421 }],
@@ -367,7 +386,8 @@ DEMO.suggestions = [
       { role: "Support", player: "POG Fennel#68419", champ: "Leona", champId: 89 },
     ];
     return {
-      line: "High Noon", emoji: "🤠", color: "#e07b1f", ok: true, comp,
+      line: "High Noon", emoji: "🤠", color: "#e07b1f", ok: true,
+      access: "current", comp,
       grid: demoGrid(DEMO_PLAYERS, comp, {
         "StallionPrime#9125": [{ role: "Top", champ: "Rek'Sai", champId: 421 }],
         "Jhin Blossoms#Jhin": [{ role: "Bot", champ: "Lucian", champId: 236 }],
@@ -384,8 +404,8 @@ DEMO.suggestions = [
       { role: "Bot", player: "POG Fennel#68419", champ: "Miss Fortune", champId: 21 },
     ];
     return {
-      line: "Pool Party", emoji: "🏖", color: "#1fc3c3", ok: false,
-      seated: 4, total: 5, comp,
+      line: "Pool Party", emoji: "🏖", color: "#1fc3c3", ok: true,
+      access: "switch", switchTo: "Mike Oxmaul#NA5", comp,
       grid: demoGrid(DEMO_PLAYERS, comp, {
         "StallionPrime#9125": [{ role: "Support", champ: "Taric", champId: 44 }],
         "POG Fennel#68419": [{ role: "Support", champ: "Zac", champId: 154 }],
