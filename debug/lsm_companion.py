@@ -239,24 +239,44 @@ def compute_suggestions(gd, libraries, blocked_names, pinned):
     """
     matrix = lsm.build_matrix(libraries)
     mastery = {lib.player: lib.mastery for lib in libraries}
+    order = [lib.player for lib in libraries]
     out = []
     for line, per_player in matrix.items():
         if len(per_player) != len(libraries):
             continue
         pools = {}
-        impossible = False
-        for player, champs in per_player.items():
-            pool = [c for c in champs if c not in blocked_names]
+        for player in order:
+            pool = [c for c in per_player.get(player, ())
+                    if c not in blocked_names]
             lock = pinned.get(player)
             if lock:
                 pool = [lock] if lock in pool else []
-            if not pool:
-                impossible = True
-                break
             pools[player] = pool
-        if impossible:
-            continue
-        comp = lsm.find_team_comp(pools, gd.champ_positions, mastery)
+        # a full comp is only possible if nobody has an empty pool
+        comp = None
+        if all(pools[p] for p in order):
+            comp = lsm.find_team_comp(pools, gd.champ_positions, mastery)
+        picks = {(p, role, champ)
+                 for p, (champ, role) in (comp or {}).items()}
+
+        # the 5x5 grid: for each player (row) and lane (column), every
+        # champion they can play there, mastery-sorted, marking the
+        # suggested pick
+        grid = []
+        for player in order:
+            m = mastery.get(player, {})
+            cells = {}
+            for role in lsm.ROLES:
+                champs = sorted(
+                    (c for c in pools[player]
+                     if role in (gd.champ_positions.get(c) or lsm.ROLES)),
+                    key=lambda c: (-m.get(c, 0), c))
+                cells[role] = [
+                    {"champ": c, "champId": gd.champ_ids.get(c),
+                     "pick": (player, role, c) in picks}
+                    for c in champs]
+            grid.append({"player": player, "cells": cells})
+
         emoji, color = lsm.style_for(line)
         out.append({
             "line": line, "emoji": emoji, "color": color,
@@ -265,6 +285,7 @@ def compute_suggestions(gd, libraries, blocked_names, pinned):
                       "champId": gd.champ_ids.get(champ)}
                      for player, (champ, role) in comp.items()]
             if comp else None,
+            "grid": grid,
         })
     out.sort(key=lambda r: (not r["ok"], r["line"].lower()))
     return out[:MAX_SUGGESTIONS]

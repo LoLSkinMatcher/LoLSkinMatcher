@@ -66,6 +66,10 @@ function render(state) {
       "Waiting for comps — needs at least two uploaded libraries " +
       "in the party.";
   }
+  const ROLES = ["Top", "Jungle", "Mid", "Bot", "Support"];
+  const ROLE_SHORT = { Top: "Top", Jungle: "JG", Mid: "Mid", Bot: "Bot",
+                       Support: "Sup" };
+
   suggestions.forEach((sug) => {
     const card = el("div", "card" + (sug.ok ? "" : " blocked"));
     card.style.setProperty("--accent", sug.color || "#c8aa6e");
@@ -73,19 +77,66 @@ function render(state) {
     h.append(el("span", "emoji", sug.emoji || ""));
     h.append(el("span", null, sug.line));
     card.append(h);
-    (sug.comp || []).forEach((seat) => {
-      const row = el("div", "seat");
-      row.append(el("span", "role", seat.role));
-      if (seat.champId) row.append(portrait(seat));
-      row.append(el("span", null, seat.champ));
-      row.append(el("span", "who", seat.player));
-      card.append(row);
-    });
+
+    // 5x5 grid: players (rows) x lanes (columns), every champion each
+    // player can play in that lane; the suggested pick is highlighted
+    const grid = sug.grid || [];
+    if (grid.length) {
+      const table = el("table", "grid");
+      const head = el("tr");
+      head.append(el("th", "corner", "Player"));
+      ROLES.forEach((r) => head.append(el("th", null, ROLE_SHORT[r])));
+      table.append(head);
+      grid.forEach((row) => {
+        const tr = el("tr");
+        tr.append(el("td", "pname", row.player));
+        ROLES.forEach((role) => {
+          const td = el("td", "cell");
+          const champs = (row.cells && row.cells[role]) || [];
+          if (!champs.length) {
+            td.append(el("span", "dash", "·"));
+          } else {
+            champs.forEach((c) => {
+              const chip = el("span", "gchip" + (c.pick ? " pick" : ""));
+              if (c.champId) chip.append(portrait(c));
+              chip.append(el("span", "gname", c.champ));
+              chip.title = c.champ + (c.pick ? " (suggested)" : "");
+              td.append(chip);
+            });
+          }
+          tr.append(td);
+        });
+        table.append(tr);
+      });
+      const wrap = el("div", "grid-wrap");
+      wrap.append(table);
+      card.append(wrap);
+    } else if (!sug.ok) {
+      card.append(el("p", "cardnote",
+        "Owned by everyone, but no full role split is possible."));
+    }
     cards.append(card);
   });
 
   $("#status").textContent =
     `updated ${new Date().toLocaleTimeString()}`;
+}
+
+/* build a grid from a comp + extra per-cell champions (demo helper) */
+function demoGrid(players, comp, extra) {
+  const ROLES = ["Top", "Jungle", "Mid", "Bot", "Support"];
+  const pickBy = {};
+  (comp || []).forEach((s) => { pickBy[s.player] = s; });
+  return players.map((p) => {
+    const cells = {};
+    ROLES.forEach((role) => { cells[role] = []; });
+    const seat = pickBy[p.name];
+    if (seat) cells[seat.role].push(
+      { champ: seat.champ, champId: seat.champId, pick: true });
+    ((extra && extra[p.name]) || []).forEach((e) =>
+      cells[e.role].push({ champ: e.champ, champId: e.champId }));
+    return { player: p.name, cells };
+  });
 }
 
 /* ---------------- demo mode ---------------- */
@@ -106,30 +157,58 @@ const DEMO = {
   enemyPicks: [
     { champ: "Jinx", champId: 222 }, { champ: "Thresh", champId: 412 },
   ],
-  suggestions: [
-    {
-      line: "Blood Moon", emoji: "👹", color: "#922b21", ok: true,
-      comp: [
-        { role: "Top", player: "StallionPrime#9125", champ: "Diana", champId: 131 },
-        { role: "Jungle", player: "POG Fennel#68419", champ: "Talon", champId: 91 },
-        { role: "Mid", player: "Jhin Blossoms#Jhin", champ: "Twisted Fate", champId: 4 },
-        { role: "Bot", player: "RubixQber#ayaya", champ: "Sivir", champId: 15 },
-        { role: "Support", player: "aesuki#sushi", champ: "Elise", champId: 60 },
-      ],
-    },
-    {
-      line: "High Noon", emoji: "🤠", color: "#e07b1f", ok: true,
-      comp: [
-        { role: "Top", player: "RubixQber#ayaya", champ: "Sion", champId: 14 },
-        { role: "Jungle", player: "StallionPrime#9125", champ: "Rek'Sai", champId: 421 },
-        { role: "Mid", player: "Jhin Blossoms#Jhin", champ: "Lucian", champId: 236 },
-        { role: "Bot", player: "aesuki#sushi", champ: "Ashe", champId: 22 },
-        { role: "Support", player: "POG Fennel#68419", champ: "Leona", champId: 89 },
-      ],
-    },
-    { line: "Pool Party", emoji: "🏖", color: "#1fc3c3", ok: false, comp: null },
-  ],
+  suggestions: [],  // filled in below
 };
+
+const DEMO_PLAYERS = DEMO.members;
+DEMO.suggestions = [
+  (() => {
+    const comp = [
+      { role: "Top", player: "StallionPrime#9125", champ: "Diana", champId: 131 },
+      { role: "Jungle", player: "POG Fennel#68419", champ: "Talon", champId: 91 },
+      { role: "Mid", player: "Jhin Blossoms#Jhin", champ: "Twisted Fate", champId: 4 },
+      { role: "Bot", player: "RubixQber#ayaya", champ: "Sivir", champId: 15 },
+      { role: "Support", player: "aesuki#sushi", champ: "Elise", champId: 60 },
+    ];
+    return {
+      line: "Blood Moon", emoji: "👹", color: "#922b21", ok: true, comp,
+      grid: demoGrid(DEMO_PLAYERS, comp, {
+        "StallionPrime#9125": [{ role: "Mid", champ: "Diana", champId: 131 },
+                               { role: "Jungle", champ: "Rek'Sai", champId: 421 }],
+        "Jhin Blossoms#Jhin": [{ role: "Support", champ: "Pyke", champId: 555 }],
+        "RubixQber#ayaya": [{ role: "Bot", champ: "Kalista", champId: 429 }],
+        "aesuki#sushi": [{ role: "Support", champ: "Thresh", champId: 412 },
+                         { role: "Mid", champ: "Zilean", champId: 26 }],
+      }),
+    };
+  })(),
+  (() => {
+    const comp = [
+      { role: "Top", player: "RubixQber#ayaya", champ: "Sion", champId: 14 },
+      { role: "Jungle", player: "StallionPrime#9125", champ: "Rek'Sai", champId: 421 },
+      { role: "Mid", player: "Jhin Blossoms#Jhin", champ: "Lucian", champId: 236 },
+      { role: "Bot", player: "aesuki#sushi", champ: "Ashe", champId: 22 },
+      { role: "Support", player: "POG Fennel#68419", champ: "Leona", champId: 89 },
+    ];
+    return {
+      line: "High Noon", emoji: "🤠", color: "#e07b1f", ok: true, comp,
+      grid: demoGrid(DEMO_PLAYERS, comp, {
+        "StallionPrime#9125": [{ role: "Top", champ: "Rek'Sai", champId: 421 }],
+        "Jhin Blossoms#Jhin": [{ role: "Bot", champ: "Lucian", champId: 236 }],
+        "RubixQber#ayaya": [{ role: "Support", champ: "Thresh", champId: 412 }],
+      }),
+    };
+  })(),
+  {
+    line: "Pool Party", emoji: "🏖", color: "#1fc3c3", ok: false,
+    comp: null,
+    grid: demoGrid(DEMO_PLAYERS, null, {
+      "Jhin Blossoms#Jhin": [{ role: "Bot", champ: "Miss Fortune", champId: 21 }],
+      "POG Fennel#68419": [{ role: "Bot", champ: "Miss Fortune", champId: 21 }],
+      "RubixQber#ayaya": [{ role: "Bot", champ: "Miss Fortune", champId: 21 }],
+    }),
+  },
+];
 
 /* ---------------- boot ---------------- */
 
