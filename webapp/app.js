@@ -24,6 +24,39 @@ function portrait(entry, banned) {
   return img;
 }
 
+/* { base, lines: { skinline: { "_": defaultPath, champ: path } } } — the
+   splash-art wallpapers per skinline per champion (loaded at boot). */
+let ART = { base: "", lines: {} };
+
+/* Splash URL for a skinline, preferring the featured champion's own skin
+   in that line (so the banner reflects who's actually in the comp), else
+   the line's default. */
+function artUrl(line, champ) {
+  const slot = ART.lines && ART.lines[line];
+  if (!slot) return null;
+  const rel = (champ && slot[champ]) || slot["_"];
+  return rel ? ART.base + rel : null;
+}
+
+/* A card with a splash-art banner header. Returns {card, body, banner};
+   append content to `body`. Falls back to the accent color when no art. */
+function makeCard(line, color, extraClass, featureChamp) {
+  const card = el("div", "card" + (extraClass ? " " + extraClass : ""));
+  card.style.setProperty("--accent", color || "#c8aa6e");
+  const banner = el("div", "banner");
+  const url = artUrl(line, featureChamp);
+  if (url) {
+    banner.style.backgroundImage = `url("${url}")`;
+  } else {
+    banner.classList.add("banner-plain");
+  }
+  banner.append(el("span", "banner-title", line));
+  card.append(banner);
+  const body = el("div", "card-body");
+  card.append(body);
+  return { card, body, banner };
+}
+
 function render(state) {
   $("#phase").textContent = state.phase || "lobby";
 
@@ -69,15 +102,11 @@ function render(state) {
         + "from the bench and check again!";
     }
     aram.forEach((r) => {
-      const card = el("div", "card" + (r.full ? " aram-full" : ""));
-      card.style.setProperty("--accent", r.color || "#c8aa6e");
-      const h = el("h3");
-      h.append(el("span", "emoji", r.emoji || ""));
-      h.append(el("span", null, r.line));
-      const badge = el("span", "aram-badge",
-        r.full ? `🎉 all ${r.total} can style!` : `${r.count}/${r.total}`);
-      h.append(badge);
-      card.append(h);
+      const feature = r.assignment[0] && r.assignment[0].champ;
+      const { card, body, banner } = makeCard(
+        r.line, r.color, r.full ? "aram-full" : "", feature);
+      banner.append(el("span", "banner-badge",
+        r.full ? `🎉 all ${r.total} can style!` : `${r.count}/${r.total}`));
       r.assignment.forEach((seat) => {
         const row = el("div", "seat");
         if (seat.champId) row.append(portrait(seat));
@@ -85,7 +114,7 @@ function render(state) {
         row.append(el("span", "src",
           seat.source === "rolled" ? "rolled" : "from bench"));
         row.append(el("span", "who", seat.player));
-        card.append(row);
+        body.append(row);
       });
       cards.append(card);
     });
@@ -114,12 +143,11 @@ function render(state) {
                        Support: "Sup" };
 
   suggestions.forEach((sug) => {
-    const card = el("div", "card" + (sug.ok ? "" : " blocked"));
-    card.style.setProperty("--accent", sug.color || "#c8aa6e");
-    const h = el("h3");
-    h.append(el("span", "emoji", sug.emoji || ""));
-    h.append(el("span", null, sug.line));
-    card.append(h);
+    // banner reflects the suggested comp's first pick, so it matches
+    // who's actually being played
+    const feature = sug.comp && sug.comp[0] && sug.comp[0].champ;
+    const { card, body } = makeCard(
+      sug.line, sug.color, sug.ok ? "" : "blocked", feature);
 
     // 5x5 grid: players (rows) x lanes (columns), every champion each
     // player can play in that lane; the suggested pick is highlighted
@@ -153,22 +181,21 @@ function render(state) {
       });
       const wrap = el("div", "grid-wrap");
       wrap.append(table);
-      card.append(wrap);
+      body.append(wrap);
     } else if (sug.comp && sug.comp.length) {
       // no lane grid in this data (older companion) — show the
       // suggested lineup it does provide, as a normal result
-      const cap = el("p", "cardnote", "Suggested lineup");
-      card.append(cap);
+      body.append(el("p", "cardnote", "Suggested lineup"));
       sug.comp.forEach((seat) => {
         const row = el("div", "seat");
         row.append(el("span", "role", seat.role));
         if (seat.champId) row.append(portrait(seat));
         row.append(el("span", null, seat.champ));
         row.append(el("span", "who", seat.player));
-        card.append(row);
+        body.append(row);
       });
     } else if (!sug.ok) {
-      card.append(el("p", "cardnote",
+      body.append(el("p", "cardnote",
         "Owned by everyone, but no full role split is possible."));
     }
     cards.append(card);
@@ -301,28 +328,38 @@ const DEMO_ARAM = {
 
 const params = new URLSearchParams(location.search);
 
+async function loadArt() {
+  try {
+    ART = await (await fetch("skinline_art.json")).json();
+  } catch (e) {
+    ART = {};   // splash art is cosmetic; fall back to accent colors
+  }
+}
+
 if (params.get("demo") === "aram") {
-  render(DEMO_ARAM);
+  loadArt().then(() => render(DEMO_ARAM));
   $("#status").textContent = "demo mode (ARAM) — no Firebase connection";
 } else if (params.get("demo")) {
-  render(DEMO);
+  loadArt().then(() => render(DEMO));
   $("#status").textContent = "demo mode — no Firebase connection";
 } else if (params.get("party")) {
-  const app = firebase.initializeApp(window.FIREBASE_CONFIG);
-  firebase.auth().signInAnonymously().then(() => {
-    firebase.firestore()
-      .collection("parties").doc(params.get("party"))
-      .onSnapshot((doc) => {
-        if (!doc.exists) {
-          $("#empty").hidden = false;
-          $("#empty").textContent =
-            "No party found — is the captain's companion running?";
-          return;
-        }
-        render(JSON.parse(doc.data().state || "{}"));
-      });
-  }).catch((err) => {
-    $("#status").textContent = `auth error: ${err.message}`;
+  loadArt().then(() => {
+    firebase.initializeApp(window.FIREBASE_CONFIG);
+    firebase.auth().signInAnonymously().then(() => {
+      firebase.firestore()
+        .collection("parties").doc(params.get("party"))
+        .onSnapshot((doc) => {
+          if (!doc.exists) {
+            $("#empty").hidden = false;
+            $("#empty").textContent =
+              "No party found — is the captain's companion running?";
+            return;
+          }
+          render(JSON.parse(doc.data().state || "{}"));
+        });
+    }).catch((err) => {
+      $("#status").textContent = `auth error: ${err.message}`;
+    });
   });
 } else {
   $("#phase").textContent = "no party";
