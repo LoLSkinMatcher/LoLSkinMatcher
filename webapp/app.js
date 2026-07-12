@@ -24,16 +24,27 @@ function portrait(entry, banned) {
   return img;
 }
 
-/* skinline name -> official splash-art wallpaper URL (loaded at boot) */
-let ART = {};
+/* { base, lines: { skinline: { "_": defaultPath, champ: path } } } — the
+   splash-art wallpapers per skinline per champion (loaded at boot). */
+let ART = { base: "", lines: {} };
+
+/* Splash URL for a skinline, preferring the featured champion's own skin
+   in that line (so the banner reflects who's actually in the comp), else
+   the line's default. */
+function artUrl(line, champ) {
+  const slot = ART.lines && ART.lines[line];
+  if (!slot) return null;
+  const rel = (champ && slot[champ]) || slot["_"];
+  return rel ? ART.base + rel : null;
+}
 
 /* A card with a splash-art banner header. Returns {card, body, banner};
    append content to `body`. Falls back to the accent color when no art. */
-function makeCard(line, color, extraClass) {
+function makeCard(line, color, extraClass, featureChamp) {
   const card = el("div", "card" + (extraClass ? " " + extraClass : ""));
   card.style.setProperty("--accent", color || "#c8aa6e");
   const banner = el("div", "banner");
-  const url = ART[line];
+  const url = artUrl(line, featureChamp);
   if (url) {
     banner.style.backgroundImage =
       `linear-gradient(90deg, rgba(10,14,19,0.96) 0%, ` +
@@ -93,8 +104,9 @@ function render(state) {
         + "from the bench and check again!";
     }
     aram.forEach((r) => {
+      const feature = r.assignment[0] && r.assignment[0].champ;
       const { card, body, banner } = makeCard(
-        r.line, r.color, r.full ? "aram-full" : "");
+        r.line, r.color, r.full ? "aram-full" : "", feature);
       banner.append(el("span", "banner-badge",
         r.full ? `🎉 all ${r.total} can style!` : `${r.count}/${r.total}`));
       r.assignment.forEach((seat) => {
@@ -133,8 +145,11 @@ function render(state) {
                        Support: "Sup" };
 
   suggestions.forEach((sug) => {
+    // banner reflects the suggested comp's first pick, so it matches
+    // who's actually being played
+    const feature = sug.comp && sug.comp[0] && sug.comp[0].champ;
     const { card, body } = makeCard(
-      sug.line, sug.color, sug.ok ? "" : "blocked");
+      sug.line, sug.color, sug.ok ? "" : "blocked", feature);
 
     // 5x5 grid: players (rows) x lanes (columns), every champion each
     // player can play in that lane; the suggested pick is highlighted
