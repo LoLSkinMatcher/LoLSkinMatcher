@@ -50,7 +50,7 @@ POLL_SECONDS = 3
 # so if a very large group would overflow it we trim the lowest-priority
 # cards rather than let the write be rejected and stall the page.
 STATE_BUDGET = 190000
-COMPANION_VERSION = "2.2"
+COMPANION_VERSION = "2.3"
 APP_TITLE = f"LoLSkinMatcher Companion  v{COMPANION_VERSION}"
 
 # Same-person alternate accounts. In the LOBBY only (never champ select), if
@@ -674,10 +674,13 @@ def watch_loop(log=print, stop=None, dry_run=False, on_link=None):
             if aram or len(libs) < 2:
                 suggestions = []
             elif cs:
-                # champ select: locked to the account in the client
+                # champ select: locked to the account in the client.
+                # NB: don't bind a local named `s` here — it would shadow the
+                # module-level s() Firestore helper that the push() closure
+                # relies on, breaking every push in lobby phase.
                 suggestions = compute_suggestions(gd, libs, blocked, pinned)
-                for s in suggestions:
-                    s["access"] = "current"
+                for sug in suggestions:
+                    sug["access"] = "current"
             else:
                 # lobby: also offer alt-account skinlines (a quick switch)
                 def alt_fetch(p):
@@ -1026,6 +1029,12 @@ def selftest():
     fit_state(small, budget=STATE_BUDGET)
     check("fit_state leaves an in-budget state untouched",
           len(small["suggestions"]) == 3)
+
+    # regression: watch_loop must NOT bind a local `s` — its nested push()
+    # closure calls the module-level s() Firestore helper, and a local `s`
+    # (e.g. a stray `for s in ...`) silently breaks every push in lobby phase.
+    check("watch_loop doesn't shadow the s() Firestore helper",
+          "s" not in watch_loop.__code__.co_varnames)
 
     print()
     if failures:
