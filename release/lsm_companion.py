@@ -50,7 +50,7 @@ POLL_SECONDS = 3
 # so if a very large group would overflow it we trim the lowest-priority
 # cards rather than let the write be rejected and stall the page.
 STATE_BUDGET = 190000
-COMPANION_VERSION = "2.3"
+COMPANION_VERSION = "2.4"
 APP_TITLE = f"LoLSkinMatcher Companion  v{COMPANION_VERSION}"
 
 # Same-person alternate accounts. In the LOBBY only (never champ select), if
@@ -61,7 +61,8 @@ APP_TITLE = f"LoLSkinMatcher Companion  v{COMPANION_VERSION}"
 # companion knows the link, not just the owner's.
 ALT_GROUPS = [
     ["68a5fce3-5123-56ad-ab23-88e1198dccb0",   # Mike Oxmaul#NA5
-     "d3ae4acb-eeb2-5292-9ee0-328a7837d09c"],  # StallionPrime#9125
+     "d3ae4acb-eeb2-5292-9ee0-328a7837d09c",   # StallionPrime#9125
+     "7912f5a7-48de-56dd-98d5-6f178cb51771"],  # HyperNova3#NA1
 ]
 
 
