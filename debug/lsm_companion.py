@@ -182,27 +182,34 @@ def require_lcu():
     return lcu
 
 
+def _full_name(summoner):
+    game = summoner.get("gameName") or summoner.get("displayName") or ""
+    tag = summoner.get("tagLine") or ""
+    if game and tag:
+        return f"{game}#{tag}"
+    return game or None
+
+
 def lobby_members(lcu):
-    """[{puuid, name}] for the current lobby, or None if not in one."""
+    """[{puuid, name-or-None}] for the current lobby; None when not in
+    a lobby. Connection failures (client closed) raise, so the watch
+    loop can tell 'no lobby' apart from 'no client'."""
     try:
         lobby = lcu.get("/lol-lobby/v2/lobby")
-    except Exception:
-        return None
+    except urllib.error.HTTPError:
+        return None  # logged in, just not in a lobby right now
     members = []
     for m in lobby.get("members", []):
         if m.get("puuid"):
-            members.append({
-                "puuid": m["puuid"],
-                "name": m.get("gameName") or m.get("summonerName")
-                or "Unknown"})
+            members.append({"puuid": m["puuid"], "name": _full_name(m)})
     return members or None
 
 
 def champ_select(lcu):
     try:
         return lcu.get("/lol-champ-select/v1/session")
-    except Exception:
-        return None
+    except urllib.error.HTTPError:
+        return None  # not in champ select
 
 
 # --------------------------------------------------------------------------
@@ -282,7 +289,11 @@ def do_upload(log=print, dry_run=False):
 
 
 def watch_loop(log=print, stop=None, dry_run=False, on_link=None):
-    """Captain mode. Runs until `stop` (threading.Event) is set."""
+    """Captain mode. Runs until `stop` (threading.Event) is set.
+
+    Survives the client closing: publishes an "offline" state and
+    reconnects automatically when League comes back.
+    """
     stop = stop or threading.Event()
     cfg = auth = None
     if not dry_run:
@@ -291,6 +302,7 @@ def watch_loop(log=print, stop=None, dry_run=False, on_link=None):
     lcu = require_lcu()
     summoner = lcu.get("/lol-summoner/v1/current-summoner")
     captain = summoner.get("puuid")
+    self_name = _full_name(summoner) or "You"
     gd = lsm.load_game_data(log)
     party_path = f"parties/{captain}"
     if not dry_run and cfg.get("webUrl"):
@@ -298,29 +310,94 @@ def watch_loop(log=print, stop=None, dry_run=False, on_link=None):
         log(f"Party page: {link}")
         if on_link:
             on_link(link)
+
     libraries_cache = {}
+    name_cache = {captain: self_name}
     last_pushed = None
+    offline = False
     log("Watching your lobby...")
+
+    def push(state):
+        nonlocal last_pushed
+        snapshot = json.dumps(state, sort_keys=True)
+        if snapshot == last_pushed:
+            return
+        if dry_run:
+            log(f"[dry-run] {state['phase']}: "
+                f"{len(state['members'])} member(s), "
+                f"{len(state['suggestions'])} suggestion(s), "
+                f"missing: {state['missing'] or 'none'}")
+        else:
+            fs_set(cfg, auth, party_path, {
+                "state": s(snapshot),
+                "captain": s(captain),
+                "updatedAt": s(now_iso()),
+            })
+            log(f"pushed: {state['phase']}, "
+                f"{len(state['members'])} member(s), "
+                f"{len(state['suggestions'])} playable line(s)")
+        last_pushed = snapshot
+
+    def resolve_name(puuid, provided):
+        """Lobby name, else summoner lookup by PUUID, else the name in
+        their uploaded library (fixes 'Unknown' in Practice Tool)."""
+        if provided:
+            name_cache[puuid] = provided
+            return provided
+        if puuid in name_cache:
+            return name_cache[puuid]
+        name = None
+        try:
+            summ = lcu.get(f"/lol-summoner/v2/summoners/puuid/{puuid}")
+            name = _full_name(summ)
+        except Exception:
+            name = None
+        if not name:
+            data = libraries_cache.get(puuid)
+            if data:
+                name = data.get("player")
+        name_cache[puuid] = name or "Unknown"
+        return name_cache[puuid]
+
+    OFFLINE_STATE = {"phase": "offline", "members": [], "missing": [],
+                     "bans": [], "enemyPicks": [], "pinned": {},
+                     "suggestions": []}
 
     while not stop.is_set():
         try:
-            members = lobby_members(lcu) or [{
-                "puuid": captain,
-                "name": summoner.get("gameName") or "You"}]
+            if lcu is None:
+                lcu = lsm.find_lcu()
+                if lcu is None or not lcu.is_alive():
+                    lcu = None
+                    if not offline:
+                        offline = True
+                        log("League client closed — waiting for it to "
+                            "come back...")
+                        push(dict(OFFLINE_STATE))
+                    stop.wait(POLL_SECONDS)
+                    continue
+                offline = False
+                log("League client reconnected.")
 
-            libs, missing = [], []
-            for m in members:
-                if m["puuid"] not in libraries_cache and not dry_run:
-                    doc = fs_get(cfg, auth, f"libraries/{m['puuid']}")
+            raw = lobby_members(lcu) or [{"puuid": captain,
+                                          "name": self_name}]
+
+            libs, missing, members = [], [], []
+            for m in raw:
+                puuid = m["puuid"]
+                if puuid not in libraries_cache and not dry_run:
+                    doc = fs_get(cfg, auth, f"libraries/{puuid}")
                     blob = field_str(doc, "data")
-                    libraries_cache[m["puuid"]] = \
+                    libraries_cache[puuid] = \
                         json.loads(blob) if blob else None
-                data = libraries_cache.get(m["puuid"])
+                name = resolve_name(puuid, m.get("name"))
+                members.append({"puuid": puuid, "name": name})
+                data = libraries_cache.get(puuid)
                 if data:
                     libs.append(lsm.parse_library(data, gd,
-                                                  display_name=m["name"]))
+                                                  display_name=name))
                 else:
-                    missing.append(m["name"])
+                    missing.append(name)
 
             cs = champ_select(lcu)
             phase = "champ select" if cs else "lobby"
@@ -348,7 +425,7 @@ def watch_loop(log=print, stop=None, dry_run=False, on_link=None):
             suggestions = compute_suggestions(gd, libs, blocked, pinned) \
                 if len(libs) >= 2 else []
 
-            state = {
+            push({
                 "phase": phase,
                 "members": members,
                 "missing": missing,
@@ -359,22 +436,10 @@ def watch_loop(log=print, stop=None, dry_run=False, on_link=None):
                                for e in enemy_picks],
                 "pinned": pinned,
                 "suggestions": suggestions,
-            }
-            snapshot = json.dumps(state, sort_keys=True)
-            if snapshot != last_pushed:
-                if dry_run:
-                    log(f"[dry-run] {phase}: {len(members)} member(s), "
-                        f"{len(suggestions)} suggestion(s), "
-                        f"missing: {missing or 'none'}")
-                else:
-                    fs_set(cfg, auth, party_path, {
-                        "state": s(snapshot),
-                        "captain": s(captain),
-                        "updatedAt": s(now_iso()),
-                    })
-                    log(f"pushed: {phase}, {len(members)} member(s), "
-                        f"{len(suggestions)} playable line(s)")
-                last_pushed = snapshot
+            })
+        except urllib.error.URLError:
+            # client (or network) dropped mid-tick; reconnect next tick
+            lcu = None
         except Exception as exc:
             log(f"(retrying) {exc}")
         stop.wait(POLL_SECONDS)

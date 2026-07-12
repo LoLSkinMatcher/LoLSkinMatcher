@@ -57,6 +57,15 @@ function render(state) {
   cards.replaceChildren();
   const suggestions = state.suggestions || [];
   $("#empty").hidden = suggestions.length > 0;
+  if (state.phase === "offline") {
+    $("#empty").textContent =
+      "The captain's League client is closed — live comps resume " +
+      "when it's back.";
+  } else if (!suggestions.length) {
+    $("#empty").textContent =
+      "Waiting for comps — needs at least two uploaded libraries " +
+      "in the party.";
+  }
   suggestions.forEach((sug) => {
     const card = el("div", "card" + (sug.ok ? "" : " blocked"));
     card.style.setProperty("--accent", sug.color || "#c8aa6e");
