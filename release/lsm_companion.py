@@ -45,8 +45,12 @@ except Exception:
 
 AUTH_CACHE = Path.home() / ".lsm_companion_auth.json"
 POLL_SECONDS = 3
-MAX_SUGGESTIONS = 12
-COMPANION_VERSION = "2.0"
+# Every shared skinline is shown. STATE_BUDGET is only a safety net: the
+# Firestore rules cap the party doc's `state` string (see firestore.rules),
+# so if a very large group would overflow it we trim the lowest-priority
+# cards rather than let the write be rejected and stall the page.
+STATE_BUDGET = 190000
+COMPANION_VERSION = "2.1"
 APP_TITLE = f"LoLSkinMatcher Companion  v{COMPANION_VERSION}"
 
 # The group's Firebase project, baked in so the exe works on its own.
@@ -304,7 +308,7 @@ def compute_suggestions(gd, libraries, blocked_names, pinned):
             "grid": grid,
         })
     out.sort(key=lambda r: (not r["ok"], r["line"].lower()))
-    return out[:MAX_SUGGESTIONS]
+    return out
 
 
 def max_assignment(player_champs):
@@ -371,7 +375,22 @@ def compute_aram(gd, libraries, rolled_by_name, bench_names):
                                    key=lambda kv: kv[0])],
         })
     out.sort(key=lambda r: (not r["full"], -r["count"], r["line"].lower()))
-    return out[:MAX_SUGGESTIONS]
+    return out
+
+
+def fit_state(state, budget=STATE_BUDGET):
+    """Keep the pushed party state under the Firestore rules' size cap.
+
+    Cards are already sorted best-first (full comps / fuller ARAM matches
+    first), so if an unusually large shared library would overflow the doc
+    we drop the lowest-priority cards until it fits, rather than letting the
+    write get rejected and freeze the page. Normal friend-group parties are
+    well under budget and untouched.
+    """
+    key = "aram" if state.get("aramMode") else "suggestions"
+    while state.get(key) and len(json.dumps(state, sort_keys=True)) > budget:
+        state[key] = state[key][:-1]
+    return state
 
 
 # --------------------------------------------------------------------------
@@ -564,7 +583,7 @@ def watch_loop(log=print, stop=None, dry_run=False, on_link=None):
                 compute_suggestions(gd, libs, blocked, pinned)
                 if len(libs) >= 2 else [])
 
-            push({
+            push(fit_state({
                 "phase": phase,
                 "aramMode": bool(aram),
                 "companionVersion": COMPANION_VERSION,
@@ -578,7 +597,7 @@ def watch_loop(log=print, stop=None, dry_run=False, on_link=None):
                 "pinned": pinned,
                 "suggestions": suggestions,
                 "aram": aram_results,
-            })
+            }))
         except urllib.error.URLError:
             # client (or network) dropped mid-tick; reconnect next tick
             lcu = None
@@ -814,6 +833,32 @@ def selftest():
                         bench_names=["Garen"])
     check("ARAM no match when pool has no owned line champ",
           not any(r["line"] == "Star Guardian" for r in res2))
+
+    # every shared skinline is shown (no arbitrary count cap) -- this is the
+    # bug where Pool Party went missing because only 12 lines were returned
+    many = {i: f"Line {i:02d}" for i in range(1, 21)}   # 20 skinlines
+    gd_many = lsm.GameData(many, {99: "Lux", 222: "Jinx"},
+                           {"Lux": {"Mid"}, "Jinx": {"Bot"}})
+    la2 = lsm.Library("A", [{"id": 99000 + i, "name": "s",
+                             "champion": "Lux", "skinlines": [many[i]]}
+                            for i in range(1, 21)])
+    lb2 = lsm.Library("B", [{"id": 222000 + i, "name": "s",
+                             "champion": "Jinx", "skinlines": [many[i]]}
+                            for i in range(1, 21)])
+    sug_all = compute_suggestions(gd_many, [la2, lb2], set(), {})
+    check("every shared skinline is shown (no 12-line cap)",
+          len(sug_all) == 20)
+
+    # fit_state: a huge state is trimmed to fit; a normal one is untouched
+    big = fit_state({"aramMode": False, "suggestions": list(sug_all),
+                     "aram": []}, budget=3000)
+    check("fit_state trims oversized state under budget",
+          len(json.dumps(big, sort_keys=True)) <= 3000
+          and 0 < len(big["suggestions"]) < 20)
+    small = {"aramMode": False, "suggestions": list(sug_all[:3]), "aram": []}
+    fit_state(small, budget=STATE_BUDGET)
+    check("fit_state leaves an in-budget state untouched",
+          len(small["suggestions"]) == 3)
 
     print()
     if failures:
