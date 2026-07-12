@@ -111,15 +111,35 @@ function render(state) {
       const wrap = el("div", "grid-wrap");
       wrap.append(table);
       card.append(wrap);
+    } else if (sug.comp && sug.comp.length) {
+      // old-companion fallback: no grid in the data, show the single
+      // suggested lineup so the card isn't empty
+      sug.comp.forEach((seat) => {
+        const row = el("div", "seat");
+        row.append(el("span", "role", seat.role));
+        if (seat.champId) row.append(portrait(seat));
+        row.append(el("span", null, seat.champ));
+        row.append(el("span", "who", seat.player));
+        card.append(row);
+      });
+      card.append(el("p", "cardnote",
+        "Captain's companion is out of date — update it to see the "
+        + "full lane grid."));
     } else if (!sug.ok) {
       card.append(el("p", "cardnote",
         "Owned by everyone, but no full role split is possible."));
+    } else {
+      card.append(el("p", "cardnote",
+        "Captain's companion is out of date — update it to see the "
+        + "full lane grid."));
     }
     cards.append(card);
   });
 
+  const ver = state.companionVersion
+    ? `  ·  captain's companion v${state.companionVersion}` : "";
   $("#status").textContent =
-    `updated ${new Date().toLocaleTimeString()}`;
+    `updated ${new Date().toLocaleTimeString()}${ver}`;
 }
 
 /* build a grid from a comp + extra per-cell champions (demo helper) */

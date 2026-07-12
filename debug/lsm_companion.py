@@ -462,6 +462,7 @@ def watch_loop(log=print, stop=None, dry_run=False, on_link=None):
 
             push({
                 "phase": phase,
+                "companionVersion": COMPANION_VERSION,
                 "members": members,
                 "missing": missing,
                 "bans": [{"champ": b, "champId": gd.champ_ids.get(b)}
