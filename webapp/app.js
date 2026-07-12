@@ -228,9 +228,12 @@ function render(state, keepStamp) {
     const { card, body, banner } = makeCard(
       sug.line, sug.color, isSwitch ? "needs-switch" : "", feature);
     if (isSwitch) {
-      // lobby only: only fieldable if this member hops to another account
+      // lobby only: fieldable if this player hot-swaps to their own alt.
+      // Show the whole hop (from -> to) so it's clear who switches to whom.
       banner.append(el("span", "banner-badge switch-badge",
-        `⚡ switch to ${shortName(sug.switchTo)}`));
+        sug.switchFrom
+          ? `⚡ ${shortName(sug.switchFrom)} → ${shortName(sug.switchTo)}`
+          : `⚡ switch to ${shortName(sug.switchTo)}`));
     } else if (sug.total && sug.seated && sug.seated < sug.total) {
       // a full five-stack may only manage a 4/5 comp (one player off theme)
       banner.append(el("span", "banner-badge",
@@ -248,7 +251,17 @@ function render(state, keepStamp) {
       table.append(head);
       grid.forEach((row) => {
         const tr = el("tr");
-        tr.append(el("td", "pname", row.player));
+        // on a switch card, the row showing the alt account is the one that
+        // swaps — label it so it's obvious this is <lobby account> hopping in
+        if (isSwitch && row.player === sug.switchTo) {
+          const pn = el("td", "pname switch-row");
+          pn.append(el("div", "switch-row-to", row.player));
+          pn.append(el("div", "switch-row-from",
+            `⚡ ${shortName(sug.switchFrom)} swaps to this`));
+          tr.append(pn);
+        } else {
+          tr.append(el("td", "pname", row.player));
+        }
         ROLES.forEach((role) => {
           const td = el("td", "cell");
           const champs = (row.cells && row.cells[role]) || [];
@@ -300,9 +313,11 @@ function render(state, keepStamp) {
   if (switchCards.length) {
     const divider = el("div", "switch-divider");
     divider.append(el("span", "switch-divider-title",
-      "⚡ Playable with a ~15s account switch"));
+      "⚡ Playable if one player switches to their other account"));
     divider.append(el("span", "switch-divider-note",
-      "one teammate swaps accounts — everyone else stays put"));
+      "We own these too — they just need one player to hop to another of "
+      + "their own accounts (the badge shows who → who). It's a quick, "
+      + "automated ~15s switch; everyone else stays put."));
     cards.append(divider);
     switchCards.forEach((s) => cards.append(renderCard(s)));
   }
@@ -414,7 +429,8 @@ DEMO.suggestions = [
     ];
     return {
       line: "Pool Party", emoji: "🏖", color: "#1fc3c3", ok: true,
-      access: "switch", switchTo: "Mike Oxmaul#NA5", comp,
+      access: "switch", switchFrom: "StallionPrime#9125",
+      switchTo: "Mike Oxmaul#NA5", comp,
       grid: demoGrid(players, comp, {
         "Mike Oxmaul#NA5": [{ role: "Support", champ: "Taric", champId: 44 }],
         "POG Fennel#68419": [{ role: "Support", champ: "Zac", champId: 154 }],

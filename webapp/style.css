@@ -262,6 +262,16 @@ h2 {
 }
 .card.needs-switch { border-style: dashed; }
 
+/* the grid row that swaps: show the alt account + who hops into it */
+td.pname.switch-row { white-space: normal; }
+.switch-row-to { color: var(--gold); font-weight: 600; }
+.switch-row-from {
+  color: var(--dim);
+  font-size: 11px;
+  font-weight: 400;
+  margin-top: 2px;
+}
+
 .card-body {
   padding: 15px 20px;
   background: linear-gradient(180deg,
