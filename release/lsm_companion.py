@@ -50,8 +50,27 @@ POLL_SECONDS = 3
 # so if a very large group would overflow it we trim the lowest-priority
 # cards rather than let the write be rejected and stall the page.
 STATE_BUDGET = 190000
-COMPANION_VERSION = "2.1"
+COMPANION_VERSION = "2.2"
 APP_TITLE = f"LoLSkinMatcher Companion  v{COMPANION_VERSION}"
+
+# Same-person alternate accounts. In the LOBBY only (never champ select), if
+# one account in a group is in the party, the others' libraries are also
+# considered: a skinline only the alt can field is surfaced as "needs a quick
+# account switch". PUUIDs are public (they're already the party-page URL and
+# Firestore keys), so nothing secret lives here. Baked in so every captain's
+# companion knows the link, not just the owner's.
+ALT_GROUPS = [
+    ["68a5fce3-5123-56ad-ab23-88e1198dccb0",   # Mike Oxmaul#NA5
+     "d3ae4acb-eeb2-5292-9ee0-328a7837d09c"],  # StallionPrime#9125
+]
+
+
+def alt_puuids(puuid):
+    """Other accounts in the same person's alt-group (or [] if none)."""
+    for group in ALT_GROUPS:
+        if puuid in group:
+            return [p for p in group if p != puuid]
+    return []
 
 # The group's Firebase project, baked in so the exe works on its own.
 # These values are PUBLIC by design (the web page ships them to every
@@ -331,6 +350,57 @@ def compute_suggestions(gd, libraries, blocked_names, pinned):
     return out
 
 
+def compute_suggestions_with_alts(gd, party, blocked, pinned, fetch):
+    """Lobby suggestions that also consider each member's alternate accounts.
+
+    party: [{"puuid", "name", "lib"}] for every lobby member (lib may be None).
+    fetch: puuid -> library dict (cached), for pulling an alt's library.
+
+    Returns compute_suggestions cards tagged with:
+      access = "current"  -> playable on the account already in the lobby
+      access = "switch"   -> only playable after that member switches to an
+                             alt (switchTo = that account's name).
+    A line playable now is always "current" (no switch suggested), even if an
+    alt could also field it. Only lines that need the alt become "switch".
+    """
+    base_libs = [m["lib"] for m in party if m["lib"]]
+    if len(base_libs) < 2:
+        return []
+
+    current = compute_suggestions(gd, base_libs, blocked, pinned)
+    for s in current:
+        s["access"] = "current"
+    seen = {s["line"] for s in current}
+    extra = []
+
+    for m in party:
+        if not m["lib"]:
+            continue
+        for ap in alt_puuids(m["puuid"]):
+            data = fetch(ap)
+            if not data:
+                continue
+            alt_name = data.get("player") or ap
+            # parse under the SAME seat name so the comp attributes to this
+            # person; alt_name is only for the "switch to X" label.
+            alt_lib = lsm.parse_library(data, gd, display_name=m["name"])
+            alt_libs = [alt_lib if x is m["lib"] else x for x in base_libs]
+            for s in compute_suggestions(gd, alt_libs, blocked, pinned):
+                if s["line"] in seen:
+                    continue           # already playable now, or via another alt
+                s["access"] = "switch"
+                s["switchTo"] = alt_name
+                s["switchFrom"] = m["name"]
+                seen.add(s["line"])
+                extra.append(s)
+
+    result = current + extra
+    # current lines first, then switch lines; full comps before partials
+    result.sort(key=lambda s: (s.get("access") == "switch",
+                               not s["ok"], s["line"].lower()))
+    return result
+
+
 def max_assignment(player_champs):
     """Assign as many players as possible a DISTINCT champion from their
     set (max bipartite matching, Kuhn's). Returns {player: champion} —
@@ -546,18 +616,20 @@ def watch_loop(log=print, stop=None, dry_run=False, on_link=None):
                 blob = field_str(doc, "data")
                 return json.loads(blob) if blob else None
 
-            libs, missing, members = [], [], []
+            libs, missing, members, party = [], [], [], []
             for m in raw:
                 puuid = m["puuid"]
                 data = fetch_library_cached(puuid, libraries_cache,
                                             fetch_lib)
                 name = resolve_name(puuid, m.get("name"))
                 members.append({"puuid": puuid, "name": name})
+                lib = None
                 if data:
-                    libs.append(lsm.parse_library(data, gd,
-                                                  display_name=name))
+                    lib = lsm.parse_library(data, gd, display_name=name)
+                    libs.append(lib)
                 else:
                     missing.append(name)
+                party.append({"puuid": puuid, "name": name, "lib": lib})
 
             cs = champ_select(lcu)
             phase = "champ select" if cs else "lobby"
@@ -599,9 +671,19 @@ def watch_loop(log=print, stop=None, dry_run=False, on_link=None):
                     if champ and player:
                         pinned[player] = champ
 
-            suggestions = [] if aram else (
-                compute_suggestions(gd, libs, blocked, pinned)
-                if len(libs) >= 2 else [])
+            if aram or len(libs) < 2:
+                suggestions = []
+            elif cs:
+                # champ select: locked to the account in the client
+                suggestions = compute_suggestions(gd, libs, blocked, pinned)
+                for s in suggestions:
+                    s["access"] = "current"
+            else:
+                # lobby: also offer alt-account skinlines (a quick switch)
+                def alt_fetch(p):
+                    return fetch_library_cached(p, libraries_cache, fetch_lib)
+                suggestions = compute_suggestions_with_alts(
+                    gd, party, blocked, pinned, alt_fetch)
 
             push(fit_state({
                 "phase": phase,
@@ -905,6 +987,34 @@ def selftest():
     check("four-stack shows a complete 4/4 comp (not a partial)",
           bool(sl4) and sl4[0]["ok"] and sl4[0]["seated"] == 4
           and sl4[0]["total"] == 4)
+
+    # alt accounts (lobby): a line only the alt owns -> "needs a switch";
+    # a line the current account owns stays "current".
+    gd_alt = lsm.GameData({1: "BothLine", 2: "AltLine"},
+                          {99: "Lux", 222: "Jinx", 86: "Garen"},
+                          {"Lux": {"Mid"}, "Jinx": {"Bot"}, "Garen": {"Top"}})
+    a_cur = {"player": "A", "skins": [{"id": 1, "name": "s",
+             "champion": "Lux", "skinlines": ["BothLine"]}]}
+    a_alt = {"player": "A-ALT", "skins": [{"id": 2, "name": "s",
+             "champion": "Garen", "skinlines": ["AltLine"]}]}
+    libA = lsm.parse_library(a_cur, gd_alt, display_name="A")
+    libB = lsm.Library("B", [{"id": 3, "name": "s", "champion": "Jinx",
+                              "skinlines": ["BothLine", "AltLine"]}])
+    party = [{"puuid": "pA", "name": "A", "lib": libA},
+             {"puuid": "pB", "name": "B", "lib": libB}]
+    globals()["ALT_GROUPS"], saved_alt = [["pA", "pALT"]], ALT_GROUPS
+    try:
+        res_alt = compute_suggestions_with_alts(
+            gd_alt, party, set(), {},
+            lambda p: a_alt if p == "pALT" else None)
+    finally:
+        globals()["ALT_GROUPS"] = saved_alt
+    by_line = {s["line"]: s for s in res_alt}
+    check("alt: a line the current account owns stays 'current'",
+          by_line.get("BothLine", {}).get("access") == "current")
+    check("alt: an alt-only line is flagged 'switch' to the alt account",
+          by_line.get("AltLine", {}).get("access") == "switch"
+          and by_line["AltLine"].get("switchTo") == "A-ALT")
 
     # fit_state: a huge state is trimmed to fit; a normal one is untouched
     big = fit_state({"aramMode": False, "suggestions": list(sug_all),
