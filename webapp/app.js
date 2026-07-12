@@ -112,8 +112,10 @@ function render(state) {
       wrap.append(table);
       card.append(wrap);
     } else if (sug.comp && sug.comp.length) {
-      // old-companion fallback: no grid in the data, show the single
-      // suggested lineup so the card isn't empty
+      // no lane grid in this data (older companion) — show the
+      // suggested lineup it does provide, as a normal result
+      const cap = el("p", "cardnote", "Suggested lineup");
+      card.append(cap);
       sug.comp.forEach((seat) => {
         const row = el("div", "seat");
         row.append(el("span", "role", seat.role));
@@ -122,16 +124,9 @@ function render(state) {
         row.append(el("span", "who", seat.player));
         card.append(row);
       });
-      card.append(el("p", "cardnote",
-        "Captain's companion is out of date — update it to see the "
-        + "full lane grid."));
     } else if (!sug.ok) {
       card.append(el("p", "cardnote",
         "Owned by everyone, but no full role split is possible."));
-    } else {
-      card.append(el("p", "cardnote",
-        "Captain's companion is out of date — update it to see the "
-        + "full lane grid."));
     }
     cards.append(card);
   });
