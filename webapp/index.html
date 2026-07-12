@@ -35,7 +35,17 @@
   </section>
 
   <section>
-    <h2 id="section-title">Skinline comps you can still play</h2>
+    <div class="section-head">
+      <h2 id="section-title">Skinline comps you can still play</h2>
+      <div id="filter" class="filter" hidden>
+        <input id="champ-filter" type="text" list="champ-list"
+               placeholder="Only skinlines with…" autocomplete="off"
+               spellcheck="false">
+        <datalist id="champ-list"></datalist>
+        <button id="filter-clear" type="button" title="Clear filter"
+                hidden>×</button>
+      </div>
+    </div>
     <div id="cards" class="cards"></div>
     <p id="empty" class="empty" hidden>Waiting for the captain's companion…</p>
   </section>
@@ -43,6 +53,12 @@
 
 <footer>
   <span id="status">·</span>
+  <nav class="links">
+    <a href="https://github.com/LoLSkinMatcher/LoLSkinMatcher/raw/main/release/LSMCompanion.exe"
+       download>⬇ Companion (.exe)</a>
+    <a href="https://github.com/LoLSkinMatcher/LoLSkinMatcher"
+       target="_blank" rel="noopener">GitHub</a>
+  </nav>
 </footer>
 
 <script src="app.js"></script>
