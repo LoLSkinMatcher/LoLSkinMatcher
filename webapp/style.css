@@ -184,7 +184,7 @@ h2 {
 /* splash-art banner header — taller, melts into the card body */
 .banner {
   position: relative;
-  height: 180px;
+  height: 210px;
   background-size: cover;
   background-position: center 22%;
   display: flex;
