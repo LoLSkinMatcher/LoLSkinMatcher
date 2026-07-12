@@ -25,9 +25,24 @@ header {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
   padding: 22px 32px;
   border-bottom: 1px solid var(--line);
 }
+.header-right { display: flex; align-items: center; gap: 20px; }
+
+.links { display: flex; gap: 18px; }
+.links a {
+  color: var(--dim);
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 13px;
+  transition: color 0.15s ease;
+}
+.links a:hover { color: var(--gold); }
 
 .brand { display: flex; align-items: center; gap: 14px; }
 
@@ -249,19 +264,6 @@ h2 {
 }
 .seat .who { color: var(--dim); font-size: 12px; margin-left: auto; }
 
-.card.blocked { opacity: 0.62; }
-.card.blocked .banner::before {
-  content: "no full comp";
-  position: absolute;
-  z-index: 1;
-  top: 10px; right: 12px;
-  font-size: 11px;
-  color: #fff;
-  background: rgba(232, 64, 87, 0.9);
-  border-radius: 6px;
-  padding: 2px 7px;
-}
-
 .cardnote { color: var(--dim); font-size: 13px; padding-top: 4px; }
 
 /* ARAM roulette */
@@ -380,23 +382,8 @@ table.grid td.cell { min-width: 92px; }
 }
 
 footer {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  flex-wrap: wrap;
   border-top: 1px solid var(--line);
   color: var(--dim);
   font-size: 12px;
   padding: 14px 32px;
 }
-footer .links { display: flex; gap: 18px; }
-footer .links a {
-  color: var(--dim);
-  text-decoration: none;
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  transition: color 0.15s ease;
-}
-footer .links a:hover { color: var(--gold); }

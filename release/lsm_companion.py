@@ -256,10 +256,17 @@ def compute_suggestions(gd, libraries, blocked_names, pinned):
     blocked_names: champions removed from everyone's pools (bans + enemy
     picks). pinned: {player_name: champion} for teammates already locked
     in — lines that can't seat their lock are dropped.
+
+    Only lines that yield a real comp are returned. A line is shown when
+    a comp seats EVERYONE; for a full five-stack it may instead show a
+    4/5 comp (one player off theme). Lines with no such comp are dropped
+    rather than shown as "no full comp" — that clutter lives only in the
+    grid you'd never play. (ARAM uses compute_aram, which keeps partials.)
     """
     matrix = lsm.build_matrix(libraries)
     mastery = {lib.player: lib.mastery for lib in libraries}
     order = [lib.player for lib in libraries]
+    total = len(order)
     out = []
     for line, per_player in matrix.items():
         if len(per_player) != len(libraries):
@@ -272,16 +279,28 @@ def compute_suggestions(gd, libraries, blocked_names, pinned):
             if lock:
                 pool = [lock] if lock in pool else []
             pools[player] = pool
-        # a full comp is only possible if nobody has an empty pool
+
+        # Prefer a comp that seats everyone. If that's impossible and the
+        # party is a full five-stack, fall back to a 4/5 comp (one player
+        # sits out the theme). Smaller parties only ever show a complete
+        # comp; anything less is dropped, not badged.
         comp = None
         if all(pools[p] for p in order):
             comp = lsm.find_team_comp(pools, gd.champ_positions, mastery)
-        picks = {(p, role, champ)
-                 for p, (champ, role) in (comp or {}).items()}
+        if comp is None and total == 5:
+            for sit_out in order:
+                sub = {p: pools[p] for p in order if p != sit_out}
+                comp = lsm.find_team_comp(sub, gd.champ_positions, mastery)
+                if comp:
+                    break
+        if not comp:
+            continue
+        seated = len(comp)
+        picks = {(p, role, champ) for p, (champ, role) in comp.items()}
 
         # the 5x5 grid: for each player (row) and lane (column), every
         # champion they can play there, mastery-sorted, marking the
-        # suggested pick
+        # suggested pick (the off-theme player, if any, has no pick)
         grid = []
         for player in order:
             m = mastery.get(player, {})
@@ -300,11 +319,12 @@ def compute_suggestions(gd, libraries, blocked_names, pinned):
         emoji, color = lsm.style_for(line)
         out.append({
             "line": line, "emoji": emoji, "color": color,
-            "ok": comp is not None,
+            "ok": seated == total,
+            "seated": seated,
+            "total": total,
             "comp": [{"role": role, "player": player, "champ": champ,
                       "champId": gd.champ_ids.get(champ)}
-                     for player, (champ, role) in comp.items()]
-            if comp else None,
+                     for player, (champ, role) in comp.items()],
             "grid": grid,
         })
     out.sort(key=lambda r: (not r["ok"], r["line"].lower()))
@@ -848,6 +868,43 @@ def selftest():
     sug_all = compute_suggestions(gd_many, [la2, lb2], set(), {})
     check("every shared skinline is shown (no 12-line cap)",
           len(sug_all) == 20)
+
+    # a line with no full comp is DROPPED (not shown as "no full comp"):
+    # two players who both only own the same single champion can't field a
+    # distinct duo.
+    gd_solo = lsm.GameData({1: "Solo Line"}, {99: "Lux"}, {"Lux": {"Mid"}})
+    lx = lsm.Library("A", [{"id": 1, "name": "s", "champion": "Lux",
+                            "skinlines": ["Solo Line"]}])
+    ly = lsm.Library("B", [{"id": 2, "name": "s", "champion": "Lux",
+                            "skinlines": ["Solo Line"]}])
+    check("no-full-comp line is hidden (2 players, same champ)",
+          not any(r["line"] == "Solo Line"
+                  for r in compute_suggestions(gd_solo, [lx, ly], set(), {})))
+
+    # a full five-stack that can't seat everyone falls back to a 4/5 comp;
+    # the same line for a 4-stack is a complete 4/4 comp (ok).
+    gd5 = lsm.GameData({1: "Squad Line"},
+                       {266: "Aatrox", 60: "Elise", 103: "Ahri", 22: "Ashe"},
+                       {"Aatrox": {"Top"}, "Elise": {"Jungle"},
+                        "Ahri": {"Mid"}, "Ashe": {"Bot"}})
+
+    def one(name, champ, cid):
+        return lsm.Library(name, [{"id": cid, "name": "s",
+                                   "champion": champ,
+                                   "skinlines": ["Squad Line"]}])
+    five = [one("P1", "Aatrox", 266000), one("P2", "Elise", 60000),
+            one("P3", "Ahri", 103000), one("P4", "Ashe", 22000),
+            one("P5", "Aatrox", 266001)]   # P5 collides with P1 -> only 4 seat
+    sl5 = [r for r in compute_suggestions(gd5, five, set(), {})
+           if r["line"] == "Squad Line"]
+    check("five-stack shows a 4/5 comp when a full comp is impossible",
+          bool(sl5) and sl5[0]["seated"] == 4 and sl5[0]["total"] == 5
+          and not sl5[0]["ok"])
+    sl4 = [r for r in compute_suggestions(gd5, five[:4], set(), {})
+           if r["line"] == "Squad Line"]
+    check("four-stack shows a complete 4/4 comp (not a partial)",
+          bool(sl4) and sl4[0]["ok"] and sl4[0]["seated"] == 4
+          and sl4[0]["total"] == 4)
 
     # fit_state: a huge state is trimmed to fit; a normal one is untouched
     big = fit_state({"aramMode": False, "suggestions": list(sug_all),

@@ -187,7 +187,11 @@ function render(state, keepStamp) {
 
   $("#section-title").textContent = "Skinline comps you can still play";
   cards.className = "cards";
-  const allSug = state.suggestions || [];
+  // Only lines with a real comp are shown. Older companions may still send
+  // "no full comp" cards (comp: null) — drop those here too so the view is
+  // clean regardless of the captain's companion version.
+  const raw = state.suggestions || [];
+  const allSug = raw.filter((s) => s.comp && s.comp.length);
   populateChampList(allSug.flatMap((s) => [...champsInSuggestion(s)]));
   $("#filter").hidden = allSug.length === 0;
   const draftFilter = activeFilter();
@@ -198,13 +202,16 @@ function render(state, keepStamp) {
     $("#empty").textContent =
       "The captain's League client is closed — live comps resume " +
       "when it's back.";
-  } else if (!allSug.length) {
+  } else if (!raw.length) {
     $("#empty").textContent =
       "Waiting for comps — needs at least two uploaded libraries " +
       "in the party.";
+  } else if (!allSug.length) {
+    $("#empty").textContent =
+      "No full skinline comp is possible from the current pools yet.";
   } else if (!suggestions.length) {
     $("#empty").textContent =
-      `No current comp fits ${filterText()} — try another champion ` +
+      `No shown comp fits ${filterText()} — try another champion ` +
       "or clear the filter.";
   }
   const ROLES = ["Top", "Jungle", "Mid", "Bot", "Support"];
@@ -215,8 +222,13 @@ function render(state, keepStamp) {
     // banner reflects the suggested comp's first pick, so it matches
     // who's actually being played
     const feature = sug.comp && sug.comp[0] && sug.comp[0].champ;
-    const { card, body } = makeCard(
-      sug.line, sug.color, sug.ok ? "" : "blocked", feature);
+    const { card, body, banner } = makeCard(sug.line, sug.color, "", feature);
+    // a full five-stack may only manage a 4/5 comp (one player off theme) —
+    // flag it as a positive, not the old red "no full comp"
+    if (sug.total && sug.seated && sug.seated < sug.total) {
+      banner.append(el("span", "banner-badge",
+        `${sug.seated}/${sug.total} can style`));
+    }
 
     // 5x5 grid: players (rows) x lanes (columns), every champion each
     // player can play in that lane; the suggested pick is highlighted
@@ -263,9 +275,6 @@ function render(state, keepStamp) {
         row.append(el("span", "who", seat.player));
         body.append(row);
       });
-    } else if (!sug.ok) {
-      body.append(el("p", "cardnote",
-        "Owned by everyone, but no full role split is possible."));
     }
     cards.append(card);
   });
@@ -366,15 +375,23 @@ DEMO.suggestions = [
       }),
     };
   })(),
-  {
-    line: "Pool Party", emoji: "🏖", color: "#1fc3c3", ok: false,
-    comp: null,
-    grid: demoGrid(DEMO_PLAYERS, null, {
-      "Jhin Blossoms#Jhin": [{ role: "Bot", champ: "Miss Fortune", champId: 21 }],
-      "POG Fennel#68419": [{ role: "Bot", champ: "Miss Fortune", champId: 21 }],
-      "RubixQber#ayaya": [{ role: "Bot", champ: "Miss Fortune", champId: 21 }],
-    }),
-  },
+  (() => {
+    // a 4/5: four can run Pool Party, aesuki has no library so sits out
+    const comp = [
+      { role: "Top", player: "RubixQber#ayaya", champ: "Gragas", champId: 79 },
+      { role: "Jungle", player: "StallionPrime#9125", champ: "Rek'Sai", champId: 421 },
+      { role: "Mid", player: "Jhin Blossoms#Jhin", champ: "Fizz", champId: 105 },
+      { role: "Bot", player: "POG Fennel#68419", champ: "Miss Fortune", champId: 21 },
+    ];
+    return {
+      line: "Pool Party", emoji: "🏖", color: "#1fc3c3", ok: false,
+      seated: 4, total: 5, comp,
+      grid: demoGrid(DEMO_PLAYERS, comp, {
+        "StallionPrime#9125": [{ role: "Support", champ: "Taric", champId: 44 }],
+        "POG Fennel#68419": [{ role: "Support", champ: "Zac", champId: 154 }],
+      }),
+    };
+  })(),
 ];
 
 const DEMO_ARAM = {
