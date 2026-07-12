@@ -184,9 +184,9 @@ h2 {
 /* splash-art banner header — taller, melts into the card body */
 .banner {
   position: relative;
-  height: 128px;
+  height: 210px;
   background-size: cover;
-  background-position: center 25%;
+  background-position: center 22%;
   display: flex;
   align-items: flex-end;
   padding: 12px 18px;
@@ -196,10 +196,10 @@ h2 {
   position: absolute;
   inset: 0;
   background:
-    linear-gradient(180deg, transparent 40%,
+    linear-gradient(180deg, transparent 48%,
       color-mix(in srgb, var(--accent) 9%, var(--panel-2)) 100%),
-    linear-gradient(95deg, rgba(7, 10, 14, 0.9) 0%,
-      rgba(7, 10, 14, 0.32) 46%, rgba(7, 10, 14, 0) 82%);
+    linear-gradient(95deg, rgba(7, 10, 14, 0.82) 0%,
+      rgba(7, 10, 14, 0.26) 42%, rgba(7, 10, 14, 0) 74%);
 }
 .banner.banner-plain {
   height: 60px;
