@@ -307,8 +307,75 @@ def compute_suggestions(gd, libraries, blocked_names, pinned):
     return out[:MAX_SUGGESTIONS]
 
 
+def max_assignment(player_champs):
+    """Assign as many players as possible a DISTINCT champion from their
+    set (max bipartite matching, Kuhn's). Returns {player: champion} —
+    may cover fewer than all players. No roles (ARAM is all-mid)."""
+    players = list(player_champs)
+    owner = {}  # champion -> player index
+
+    def augment(i, visited):
+        for champ in sorted(player_champs[players[i]]):
+            if champ in visited:
+                continue
+            visited.add(champ)
+            if champ not in owner or augment(owner[champ], visited):
+                owner[champ] = i
+                return True
+        return False
+
+    for i in range(len(players)):
+        augment(i, set())
+    return {players[idx]: champ for champ, idx in owner.items()}
+
+
+def compute_aram(gd, libraries, rolled_by_name, bench_names):
+    """ARAM skinline roulette: for each skinline, how many party members
+    can end up on a DISTINCT champion in that line — playing their rolled
+    champ or swapping to a shared bench champ — that they own a skin for.
+
+    rolled_by_name: {player: champion currently rolled to them}.
+    bench_names: champions on the shared bench (anyone can grab, once).
+    Returns matchable lines (>=2 players), full-party matches first.
+    """
+    matrix = lsm.build_matrix(libraries)   # {line: {player: owned champs}}
+    party = [lib.player for lib in libraries]
+    bench = set(bench_names)
+    out = []
+    for line, per_player in matrix.items():
+        cand = {}
+        for p in party:
+            owned = per_player.get(p, set())
+            avail = set(bench)
+            rolled = rolled_by_name.get(p)
+            if rolled:
+                avail.add(rolled)
+            hit = owned & avail      # in this line, owns a skin, reachable
+            if hit:
+                cand[p] = hit
+        if len(cand) < 2:
+            continue
+        assign = max_assignment(cand)
+        if len(assign) < 2:
+            continue
+        emoji, color = lsm.style_for(line)
+        out.append({
+            "line": line, "emoji": emoji, "color": color,
+            "count": len(assign), "total": len(party),
+            "full": len(assign) == len(party),
+            "assignment": [
+                {"player": p, "champ": c, "champId": gd.champ_ids.get(c),
+                 "source": "rolled" if rolled_by_name.get(p) == c
+                 else "bench"}
+                for p, c in sorted(assign.items(),
+                                   key=lambda kv: kv[0])],
+        })
+    out.sort(key=lambda r: (not r["full"], -r["count"], r["line"].lower()))
+    return out[:MAX_SUGGESTIONS]
+
+
 # --------------------------------------------------------------------------
-# Core actions (shared by CLI and GUI)
+# Core actions (shared by GUI and CLI)
 # --------------------------------------------------------------------------
 
 def do_upload(log=print, dry_run=False):
@@ -455,9 +522,27 @@ def watch_loop(log=print, stop=None, dry_run=False, on_link=None):
 
             cs = champ_select(lcu)
             phase = "champ select" if cs else "lobby"
+            aram = cs.get("benchEnabled") if cs else False
             blocked, enemy_picks, pinned = set(), [], {}
             bans = []
-            if cs:
+            aram_results = []
+            name_by_puuid = {m["puuid"]: m["name"] for m in members}
+            if cs and aram:
+                # ARAM roulette: rolled champ per party member + shared
+                # bench; no bans/roles.
+                rolled_by_name = {}
+                for t in cs.get("myTeam", []):
+                    champ = gd.champ_names.get(t.get("championId") or 0)
+                    player = name_by_puuid.get(t.get("puuid"))
+                    if champ and player:
+                        rolled_by_name[player] = champ
+                bench_names = [gd.champ_names.get(b.get("championId"))
+                               for b in cs.get("benchChampions", [])]
+                bench_names = [b for b in bench_names if b]
+                if len(libs) >= 2:
+                    aram_results = compute_aram(gd, libs, rolled_by_name,
+                                                bench_names)
+            elif cs:
                 ban_ids = (cs.get("bans", {}).get("myTeamBans", [])
                            + cs.get("bans", {}).get("theirTeamBans", []))
                 bans = [b for b in (gd.champ_names.get(cid)
@@ -469,18 +554,19 @@ def watch_loop(log=print, stop=None, dry_run=False, on_link=None):
                                for cid in enemy_ids
                                if gd.champ_names.get(cid)]
                 blocked = set(bans) | set(enemy_picks)
-                name_by_puuid = {m["puuid"]: m["name"] for m in members}
                 for t in cs.get("myTeam", []):
                     champ = gd.champ_names.get(t.get("championId") or 0)
                     player = name_by_puuid.get(t.get("puuid"))
                     if champ and player:
                         pinned[player] = champ
 
-            suggestions = compute_suggestions(gd, libs, blocked, pinned) \
-                if len(libs) >= 2 else []
+            suggestions = [] if aram else (
+                compute_suggestions(gd, libs, blocked, pinned)
+                if len(libs) >= 2 else [])
 
             push({
                 "phase": phase,
+                "aramMode": bool(aram),
                 "companionVersion": COMPANION_VERSION,
                 "members": members,
                 "missing": missing,
@@ -491,6 +577,7 @@ def watch_loop(log=print, stop=None, dry_run=False, on_link=None):
                                for e in enemy_picks],
                 "pinned": pinned,
                 "suggestions": suggestions,
+                "aram": aram_results,
             })
         except urllib.error.URLError:
             # client (or network) dropped mid-tick; reconnect next tick
@@ -697,6 +784,36 @@ def selftest():
     before = calls["n"]
     fetch_library_cached("p1", cache, fetch)
     check("served from cache, no re-fetch", calls["n"] == before)
+
+    # ARAM matching: max distinct-champion assignment (no roles)
+    check("max_assignment covers all when possible",
+          len(max_assignment({"A": {"Lux"}, "B": {"Jinx"}})) == 2)
+    check("max_assignment is partial when champs collide",
+          len(max_assignment({"A": {"Lux"}, "B": {"Lux"}})) == 1)
+    check("max_assignment finds augmenting path",
+          len(max_assignment({"A": {"Lux", "Jinx"}, "B": {"Lux"},
+                              "C": {"Jinx", "Sett"}})) == 3)
+
+    # compute_aram: rolled + bench, owned-skin, distinct
+    gd = lsm.GameData({1: "Star Guardian"},
+                      {99: "Lux", 222: "Jinx", 875: "Sett", 86: "Garen"},
+                      {})
+    la = lsm.Library("A", [{"id": 1, "name": "s", "champion": "Lux",
+                            "skinlines": ["Star Guardian"]}])
+    lb = lsm.Library("B", [{"id": 2, "name": "s", "champion": "Jinx",
+                            "skinlines": ["Star Guardian"]}])
+    # A rolled Lux; B rolled Sett (no SG skin) but bench has Jinx (B owns)
+    res = compute_aram(gd, [la, lb], {"A": "Lux", "B": "Sett"},
+                       bench_names=["Jinx"])
+    sg = [r for r in res if r["line"] == "Star Guardian"]
+    check("ARAM full match via rolled + bench",
+          bool(sg) and sg[0]["full"]
+          and len(sg[0]["assignment"]) == 2)
+    # neither can reach a Star Guardian champ -> no match
+    res2 = compute_aram(gd, [la, lb], {"A": "Sett", "B": "Sett"},
+                        bench_names=["Garen"])
+    check("ARAM no match when pool has no owned line champ",
+          not any(r["line"] == "Star Guardian" for r in res2))
 
     print()
     if failures:

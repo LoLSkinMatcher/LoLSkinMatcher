@@ -30,6 +30,13 @@ can play — live, during champ select.
   champions from everyone's pools, pins locked-in teammates → runs the
   same comp solver as the desktop app → pushes the whole state as one
   document to `parties/{captain puuid}`. Prints the shareable web link.
+- **ARAM mode** — when champ select has `benchEnabled` (ARAM), the
+  companion switches to "skinline roulette": for each skinline it checks
+  whether party members can each land a DISTINCT champion in that line —
+  playing their rolled champ or swapping to a shared bench champ — that
+  they own a skin for (max bipartite matching, no lanes). The page shows
+  matchable lines, celebrating full-party matches. Detection is
+  automatic; no manual toggle needed.
 - **`webapp/`** — static page on Firebase Hosting. Anonymous auth +
   a realtime listener on the party document. Renders party chips, bans,
   enemy picks, and comp cards with champion icons. `?demo=1` shows

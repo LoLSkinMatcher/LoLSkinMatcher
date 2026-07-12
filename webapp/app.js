@@ -55,6 +55,49 @@ function render(state) {
 
   const cards = $("#cards");
   cards.replaceChildren();
+
+  // ARAM roulette mode: no lanes, just who can style from the current
+  // rolls + shared bench.
+  if (state.aramMode) {
+    $("#section-title").textContent = "ARAM skinline roulette 🎲";
+    cards.className = "cards aram-cards";
+    const aram = state.aram || [];
+    $("#empty").hidden = aram.length > 0;
+    if (!aram.length) {
+      $("#empty").textContent =
+        "No skinline matches from the current rolls — reroll or grab "
+        + "from the bench and check again!";
+    }
+    aram.forEach((r) => {
+      const card = el("div", "card" + (r.full ? " aram-full" : ""));
+      card.style.setProperty("--accent", r.color || "#c8aa6e");
+      const h = el("h3");
+      h.append(el("span", "emoji", r.emoji || ""));
+      h.append(el("span", null, r.line));
+      const badge = el("span", "aram-badge",
+        r.full ? `🎉 all ${r.total} can style!` : `${r.count}/${r.total}`);
+      h.append(badge);
+      card.append(h);
+      r.assignment.forEach((seat) => {
+        const row = el("div", "seat");
+        if (seat.champId) row.append(portrait(seat));
+        row.append(el("span", null, seat.champ));
+        row.append(el("span", "src",
+          seat.source === "rolled" ? "rolled" : "from bench"));
+        row.append(el("span", "who", seat.player));
+        card.append(row);
+      });
+      cards.append(card);
+    });
+    const ver = state.companionVersion
+      ? `  ·  captain's companion v${state.companionVersion}` : "";
+    $("#status").textContent =
+      `updated ${new Date().toLocaleTimeString()}${ver}`;
+    return;
+  }
+
+  $("#section-title").textContent = "Skinline comps you can still play";
+  cards.className = "cards";
   const suggestions = state.suggestions || [];
   $("#empty").hidden = suggestions.length > 0;
   if (state.phase === "offline") {
@@ -225,11 +268,43 @@ DEMO.suggestions = [
   },
 ];
 
+const DEMO_ARAM = {
+  phase: "champ select",
+  aramMode: true,
+  members: [
+    { name: "Mike Oxmaul#NA5" }, { name: "StallionPrime#9125" },
+    { name: "aesuki#sushi" },
+  ],
+  missing: [],
+  aram: [
+    {
+      line: "Star Guardian", emoji: "⭐", color: "#f2c94c",
+      count: 3, total: 3, full: true,
+      assignment: [
+        { player: "Mike Oxmaul#NA5", champ: "Lux", champId: 99, source: "rolled" },
+        { player: "StallionPrime#9125", champ: "Jinx", champId: 222, source: "bench" },
+        { player: "aesuki#sushi", champ: "Soraka", champId: 16, source: "rolled" },
+      ],
+    },
+    {
+      line: "Pool Party", emoji: "🏖", color: "#1fc3c3",
+      count: 2, total: 3, full: false,
+      assignment: [
+        { player: "Mike Oxmaul#NA5", champ: "Miss Fortune", champId: 21, source: "bench" },
+        { player: "StallionPrime#9125", champ: "Draven", champId: 119, source: "rolled" },
+      ],
+    },
+  ],
+};
+
 /* ---------------- boot ---------------- */
 
 const params = new URLSearchParams(location.search);
 
-if (params.get("demo")) {
+if (params.get("demo") === "aram") {
+  render(DEMO_ARAM);
+  $("#status").textContent = "demo mode (ARAM) — no Firebase connection";
+} else if (params.get("demo")) {
   render(DEMO);
   $("#status").textContent = "demo mode — no Firebase connection";
 } else if (params.get("party")) {
