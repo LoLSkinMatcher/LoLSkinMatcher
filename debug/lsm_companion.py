@@ -46,7 +46,8 @@ except Exception:
 AUTH_CACHE = Path.home() / ".lsm_companion_auth.json"
 POLL_SECONDS = 3
 MAX_SUGGESTIONS = 12
-APP_TITLE = "LoLSkinMatcher Companion"
+COMPANION_VERSION = "2.0"
+APP_TITLE = f"LoLSkinMatcher Companion  v{COMPANION_VERSION}"
 
 # The group's Firebase project, baked in so the exe works on its own.
 # These values are PUBLIC by design (the web page ships them to every
@@ -488,8 +489,13 @@ def run_gui():
     frame = ttk.Frame(root, padding=16)
     frame.pack(fill="both", expand=True)
 
-    ttk.Label(frame, text="LoLSkinMatcher Companion",
-              font=("Segoe UI Semibold", 14)).pack(anchor="w")
+    header = ttk.Frame(frame)
+    header.pack(anchor="w", fill="x")
+    ttk.Label(header, text="LoLSkinMatcher Companion",
+              font=("Segoe UI Semibold", 14)).pack(side="left")
+    ttk.Label(header, text=f"v{COMPANION_VERSION}", foreground="#888",
+              font=("Segoe UI", 10)).pack(side="left", padx=(6, 0),
+                                          pady=(6, 0))
     ttk.Label(frame, text="Keep it simple: upload once, watch when "
                           "you're the captain.",
               foreground="#666").pack(anchor="w", pady=(0, 12))
