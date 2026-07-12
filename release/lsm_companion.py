@@ -184,6 +184,22 @@ def field_str(doc, name):
             .get("stringValue"))
 
 
+def fetch_library_cached(puuid, cache, fetch):
+    """Return a player's library dict, from cache or a fresh fetch.
+
+    Only SUCCESSFUL fetches are cached — a miss is never stored — so a
+    library uploaded AFTER the player joined the lobby is retried on the
+    next poll instead of being stuck at "no library yet". `fetch(puuid)`
+    returns the library dict, or None if not uploaded yet.
+    """
+    data = cache.get(puuid)
+    if data is None:
+        data = fetch(puuid)
+        if data:
+            cache[puuid] = data
+    return data
+
+
 # --------------------------------------------------------------------------
 # LCU helpers (on top of the main app's client discovery)
 # --------------------------------------------------------------------------
@@ -417,17 +433,20 @@ def watch_loop(log=print, stop=None, dry_run=False, on_link=None):
             raw = lobby_members(lcu) or [{"puuid": captain,
                                           "name": self_name}]
 
+            def fetch_lib(puuid):
+                if dry_run:
+                    return None
+                doc = fs_get(cfg, auth, f"libraries/{puuid}")
+                blob = field_str(doc, "data")
+                return json.loads(blob) if blob else None
+
             libs, missing, members = [], [], []
             for m in raw:
                 puuid = m["puuid"]
-                if puuid not in libraries_cache and not dry_run:
-                    doc = fs_get(cfg, auth, f"libraries/{puuid}")
-                    blob = field_str(doc, "data")
-                    libraries_cache[puuid] = \
-                        json.loads(blob) if blob else None
+                data = fetch_library_cached(puuid, libraries_cache,
+                                            fetch_lib)
                 name = resolve_name(puuid, m.get("name"))
                 members.append({"puuid": puuid, "name": name})
-                data = libraries_cache.get(puuid)
                 if data:
                     libs.append(lsm.parse_library(data, gd,
                                                   display_name=name))
@@ -650,11 +669,48 @@ def run_gui():
 
 # --------------------------------------------------------------------------
 
+def selftest():
+    """Regression tests for the bits that don't need League/Firebase."""
+    failures = []
+
+    def check(label, cond):
+        print(("  OK  " if cond else " FAIL ") + label)
+        if not cond:
+            failures.append(label)
+
+    # a library uploaded AFTER a player joins the lobby must be picked up
+    db = {}                       # simulated Firestore libraries
+    calls = {"n": 0}
+
+    def fetch(puuid):
+        calls["n"] += 1
+        return db.get(puuid)
+
+    cache = {}
+    check("missing library -> None, not cached",
+          fetch_library_cached("p1", cache, fetch) is None
+          and "p1" not in cache)
+    db["p1"] = {"player": "P1", "skins": []}   # player uploads now
+    check("late upload picked up on next poll",
+          fetch_library_cached("p1", cache, fetch) == db["p1"])
+    check("now cached", cache.get("p1") == db["p1"])
+    before = calls["n"]
+    fetch_library_cached("p1", cache, fetch)
+    check("served from cache, no re-fetch", calls["n"] == before)
+
+    print()
+    if failures:
+        print(f"{len(failures)} FAILURE(S): {failures}")
+        return 1
+    print("All companion self tests passed.")
+    return 0
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(
         description="League Skin Matcher companion")
     parser.add_argument("command", nargs="?",
-                        choices=["upload", "watch", "gui"],
+                        choices=["upload", "watch", "gui", "selftest"],
                         help="omit (or double-click the file) for the "
                              "mini app window")
     parser.add_argument("--dry-run", action="store_true",
@@ -666,6 +722,8 @@ def main(argv=None):
             do_upload(dry_run=args.dry_run)
         elif args.command == "watch":
             watch_loop(dry_run=args.dry_run)
+        elif args.command == "selftest":
+            return selftest()
         else:
             run_gui()
     except CompanionError as exc:
