@@ -26,37 +26,39 @@ multiple accounts, a champion lock for the Team Builder, and per-skinline
 emoji + color badges. Rek'Sai can be placed in all five roles. She plays
 everywhere.
 
+The current app is the **Companion** + web page (see
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full design).
+
 ## Running it
 
-**Option A — Windows executable (no install):** run
-`release/LeagueSkinMatcher.exe`. SmartScreen may warn because it's an
-unsigned hobby exe — "More info → Run anyway".
+**Windows executable (no install):** run `release/LSMCompanion.exe`.
+Upload your library once, then the captain keeps it open to feed the
+live party page. SmartScreen may warn on an unsigned exe — "More info →
+Run anyway".
 
-**Option B — from source:** needs Python 3.9+ (python.org default install;
-standard library only, no pip packages):
-
-```
-python release/league_skin_matcher.py     # desktop app
-python release/lsm_companion.py            # party companion
-```
-
-Everything ships from `release/` — source and prebuilt exes together.
-Both are the same app; the exe is just the script bundled with a Python
-interpreter via PyInstaller.
-
-### CLI extras
+**From source:** needs Python 3.9+ (python.org default install; standard
+library only, no pip packages):
 
 ```
-python league_skin_matcher.py --export [FILE]   # export without the GUI
-python league_skin_matcher.py --load a.json …   # open with files loaded
-python league_skin_matcher.py --selftest        # run the built-in tests
+python release/lsm_companion.py
+```
+
+### Deprecated: the old offline desktop app
+
+The original standalone tool (Skin Options + Team Builder tabs over
+manually-traded JSON) is no longer shipped as an exe. Its code lives on
+in `league_skin_matcher.py` — now the shared engine the Companion imports
+— so you can still run it from source if you want the offline experience:
+
+```
+python release/league_skin_matcher.py            # the old desktop GUI
+python release/league_skin_matcher.py --selftest # engine self tests
 ```
 
 ## Building the exe
 
 ```
 python -m pip install pyinstaller
-python -m PyInstaller --onefile --windowed --icon reksai.ico --name LeagueSkinMatcher release/league_skin_matcher.py
 python -m PyInstaller --onefile --windowed --icon reksai.ico --name LSMCompanion release/lsm_companion.py
 ```
 
