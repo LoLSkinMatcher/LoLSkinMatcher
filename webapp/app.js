@@ -173,7 +173,7 @@ function render(state, keepStamp) {
       r.assignment.forEach((seat) => {
         const row = el("div", "seat");
         if (seat.champId) row.append(portrait(seat));
-        row.append(el("span", null, seat.champ));
+        row.append(el("span", null, seat.skin || seat.champ));
         row.append(el("span", "src",
           seat.source === "rolled" ? "rolled" : "from bench"));
         row.append(el("span", "who", seat.player));
@@ -258,8 +258,13 @@ function render(state, keepStamp) {
             champs.forEach((c) => {
               const chip = el("span", "gchip" + (c.pick ? " pick" : ""));
               if (c.champId) chip.append(portrait(c));
-              chip.append(el("span", "gname", c.champ));
-              chip.title = c.champ + (c.pick ? " (suggested)" : "");
+              // the suggested pick shows its exact skin name (e.g. "Cowgirl
+              // Miss Fortune"); alternatives stay compact as the champ name,
+              // with the skin name one hover away
+              chip.append(el("span", "gname",
+                (c.pick && c.skin) ? c.skin : c.champ));
+              chip.title = (c.skin ? c.skin + " — " : "") + c.champ
+                + (c.pick ? " (suggested)" : "");
               td.append(chip);
             });
           }
@@ -278,7 +283,7 @@ function render(state, keepStamp) {
         const row = el("div", "seat");
         row.append(el("span", "role", seat.role));
         if (seat.champId) row.append(portrait(seat));
-        row.append(el("span", null, seat.champ));
+        row.append(el("span", null, seat.skin || seat.champ));
         row.append(el("span", "who", seat.player));
         body.append(row);
       });
@@ -331,7 +336,8 @@ function demoGrid(players, comp, extra) {
     ROLES.forEach((role) => { cells[role] = []; });
     const seat = pickBy[p.name];
     if (seat) cells[seat.role].push(
-      { champ: seat.champ, champId: seat.champId, pick: true });
+      { champ: seat.champ, champId: seat.champId, skin: seat.skin,
+        pick: true });
     ((extra && extra[p.name]) || []).forEach((e) =>
       cells[e.role].push({ champ: e.champ, champId: e.champId }));
     return { player: p.name, cells };
@@ -358,11 +364,11 @@ const DEMO_PLAYERS = DEMO.members;
 DEMO.suggestions = [
   (() => {
     const comp = [
-      { role: "Top", player: "StallionPrime#9125", champ: "Diana", champId: 131 },
-      { role: "Jungle", player: "POG Fennel#68419", champ: "Talon", champId: 91 },
-      { role: "Mid", player: "Jhin Blossoms#Jhin", champ: "Twisted Fate", champId: 4 },
-      { role: "Bot", player: "RubixQber#ayaya", champ: "Sivir", champId: 15 },
-      { role: "Support", player: "aesuki#sushi", champ: "Elise", champId: 60 },
+      { role: "Top", player: "StallionPrime#9125", champ: "Diana", champId: 131, skin: "Blood Moon Diana" },
+      { role: "Jungle", player: "POG Fennel#68419", champ: "Talon", champId: 91, skin: "Blood Moon Talon" },
+      { role: "Mid", player: "Jhin Blossoms#Jhin", champ: "Twisted Fate", champId: 4, skin: "Blood Moon Twisted Fate" },
+      { role: "Bot", player: "RubixQber#ayaya", champ: "Sivir", champId: 15, skin: "Blood Moon Sivir" },
+      { role: "Support", player: "aesuki#sushi", champ: "Elise", champId: 60, skin: "Blood Moon Elise" },
     ];
     return {
       line: "Blood Moon", emoji: "👹", color: "#922b21", ok: true,
@@ -379,11 +385,11 @@ DEMO.suggestions = [
   })(),
   (() => {
     const comp = [
-      { role: "Top", player: "RubixQber#ayaya", champ: "Sion", champId: 14 },
-      { role: "Jungle", player: "StallionPrime#9125", champ: "Rek'Sai", champId: 421 },
-      { role: "Mid", player: "Jhin Blossoms#Jhin", champ: "Lucian", champId: 236 },
-      { role: "Bot", player: "aesuki#sushi", champ: "Ashe", champId: 22 },
-      { role: "Support", player: "POG Fennel#68419", champ: "Leona", champId: 89 },
+      { role: "Top", player: "RubixQber#ayaya", champ: "Sion", champId: 14, skin: "High Noon Sion" },
+      { role: "Jungle", player: "StallionPrime#9125", champ: "Rek'Sai", champId: 421, skin: "High Noon Rek'Sai" },
+      { role: "Mid", player: "Jhin Blossoms#Jhin", champ: "Lucian", champId: 236, skin: "High Noon Lucian" },
+      { role: "Bot", player: "aesuki#sushi", champ: "Ashe", champId: 22, skin: "High Noon Ashe" },
+      { role: "Support", player: "POG Fennel#68419", champ: "Leona", champId: 89, skin: "High Noon Leona" },
     ];
     return {
       line: "High Noon", emoji: "🤠", color: "#e07b1f", ok: true,
@@ -401,10 +407,10 @@ DEMO.suggestions = [
     const players = DEMO_PLAYERS.map((p) =>
       p.name === "StallionPrime#9125" ? { name: "Mike Oxmaul#NA5" } : p);
     const comp = [
-      { role: "Top", player: "RubixQber#ayaya", champ: "Gragas", champId: 79 },
-      { role: "Jungle", player: "Mike Oxmaul#NA5", champ: "Rek'Sai", champId: 421 },
-      { role: "Mid", player: "Jhin Blossoms#Jhin", champ: "Fizz", champId: 105 },
-      { role: "Bot", player: "POG Fennel#68419", champ: "Miss Fortune", champId: 21 },
+      { role: "Top", player: "RubixQber#ayaya", champ: "Gragas", champId: 79, skin: "Pool Party Gragas" },
+      { role: "Jungle", player: "Mike Oxmaul#NA5", champ: "Rek'Sai", champId: 421, skin: "Pool Party Rek'Sai" },
+      { role: "Mid", player: "Jhin Blossoms#Jhin", champ: "Fizz", champId: 105, skin: "Pool Party Fizz" },
+      { role: "Bot", player: "POG Fennel#68419", champ: "Miss Fortune", champId: 21, skin: "Pool Party Miss Fortune" },
     ];
     return {
       line: "Pool Party", emoji: "🏖", color: "#1fc3c3", ok: true,

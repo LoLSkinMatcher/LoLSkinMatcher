@@ -366,8 +366,18 @@ table.grid td.cell { min-width: 92px; }
 .gchip.pick {
   border-color: var(--gold);
   background: rgba(200, 170, 110, 0.14);
+  align-items: flex-start;
 }
-.gchip.pick .gname { color: var(--gold); font-weight: 600; }
+.gchip.pick .gname {
+  color: var(--gold);
+  font-weight: 600;
+  /* the pick shows the full skin name — let it wrap instead of forcing a
+     very wide column */
+  max-width: 128px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.2;
+}
 .cell .dash { color: #3b4753; }
 
 .grid-wrap { overflow-x: auto; }
