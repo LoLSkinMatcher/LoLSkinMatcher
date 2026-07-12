@@ -21,10 +21,10 @@ can play — live, during champ select.
 
 ## Pieces
 
-- **`debug/lsm_companion.py upload`** — one-shot. Reads your skins + PUUID from the
+- **`release/lsm_companion.py upload`** — one-shot. Reads your skins + PUUID from the
   League client, uploads to `libraries/{puuid}`, exits. Run it again when
   you buy skins. This replaces trading JSON files.
-- **`debug/lsm_companion.py watch`** — captain mode, the only long-running process.
+- **`release/lsm_companion.py watch`** — captain mode, the only long-running process.
   Polls the LCU every 3s: lobby members → fetches their libraries from
   Firestore → champ select session → removes banned + enemy-picked
   champions from everyone's pools, pins locked-in teammates → runs the

@@ -36,13 +36,12 @@ unsigned hobby exe — "More info → Run anyway".
 standard library only, no pip packages):
 
 ```
-python release/league_skin_matcher.py
+python release/league_skin_matcher.py     # desktop app
+python release/lsm_companion.py            # party companion
 ```
 
-(`debug/` holds the in-development copies; `release/` is the stable
-pair, refreshed when a version ships.)
-
-Both are the same app — the exe is just the script bundled with a Python
+Everything ships from `release/` — source and prebuilt exes together.
+Both are the same app; the exe is just the script bundled with a Python
 interpreter via PyInstaller.
 
 ### CLI extras
@@ -57,7 +56,8 @@ python league_skin_matcher.py --selftest        # run the built-in tests
 
 ```
 python -m pip install pyinstaller
-python -m PyInstaller --onefile --windowed --icon reksai.ico --name LeagueSkinMatcher debug/league_skin_matcher.py
+python -m PyInstaller --onefile --windowed --icon reksai.ico --name LeagueSkinMatcher release/league_skin_matcher.py
+python -m PyInstaller --onefile --windowed --icon reksai.ico --name LSMCompanion release/lsm_companion.py
 ```
 
 ## Privacy / data
