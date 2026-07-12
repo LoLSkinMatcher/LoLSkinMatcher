@@ -46,9 +46,7 @@ function makeCard(line, color, extraClass, featureChamp) {
   const banner = el("div", "banner");
   const url = artUrl(line, featureChamp);
   if (url) {
-    banner.style.backgroundImage =
-      `linear-gradient(90deg, rgba(10,14,19,0.96) 0%, ` +
-      `rgba(10,14,19,0.55) 45%, rgba(10,14,19,0.10) 100%), url("${url}")`;
+    banner.style.backgroundImage = `url("${url}")`;
   } else {
     banner.classList.add("banner-plain");
   }
