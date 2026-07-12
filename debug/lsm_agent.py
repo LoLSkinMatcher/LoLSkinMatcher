@@ -2,37 +2,35 @@
 """
 League Skin Matcher — Sync Agent (v2.0 prototype)
 
-The background half of the web app. Two jobs:
+Double-click (or run with no arguments) for the mini app: a small
+window with two controls —
 
-  python lsm_agent.py upload
-      Read your owned skins from the League client, upload them to the
-      group's Firestore database (keyed by your PUUID), then exit.
-      Friends run this once (and again whenever they buy skins).
+    [ Upload my library ]   sync your owned skins to the group database
+    [ Watch live lobby  ]   captain mode: follow your lobby/champ select
+                            and feed the party web page in real time
 
-  python lsm_agent.py watch
-      Captain mode. Keeps running: watches your League lobby and champ
-      select via the local client API, pulls party members' libraries
-      from Firestore, computes which skinline comps are still possible
-      (bans and enemy picks removed live), and pushes everything to
-      Firestore for the web app to display. Prints the web link on start.
+Console use still works for scripting:
 
-  Add --dry-run to either command to see what would be sent without
-  touching Firestore (no config needed).
+    python lsm_agent.py upload   [--dry-run]
+    python lsm_agent.py watch    [--dry-run]
 
-Setup: copy firebase_config.example.json to firebase_config.json and
-fill in your Firebase project's apiKey + projectId. Uses Firebase
-ANONYMOUS auth — no account, no sign-in; a silent token is created on
-first run and cached in your user folder.
+Setup: firebase_config.json (next to this file or in the repo root)
+with the group's apiKey + projectId — see firebase_config.example.json.
+Uses Firebase ANONYMOUS auth: no account, no sign-in; a silent token is
+created on first run and cached in your user folder.
 
 Standard library only, same as the main app.
 """
 
 import argparse
 import json
+import queue
 import sys
+import threading
 import time
 import urllib.error
 import urllib.request
+import webbrowser
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -44,15 +42,29 @@ try:
 except Exception:
     pass
 
-# the config may sit next to this script or at the repo root
-_CONFIG_CANDIDATES = [Path(__file__).with_name("firebase_config.json"),
-                      Path(__file__).parent.parent
-                      / "firebase_config.json"]
-CONFIG_PATH = next((p for p in _CONFIG_CANDIDATES if p.is_file()),
-                   _CONFIG_CANDIDATES[0])
 AUTH_CACHE = Path.home() / ".lsm_agent_auth.json"
 POLL_SECONDS = 3
 MAX_SUGGESTIONS = 12
+AGENT_TITLE = "LoLSkinMatcher Agent"
+
+
+class AgentError(RuntimeError):
+    """A problem the user can fix (no client, missing config, ...)."""
+
+
+def _config_path():
+    """firebase_config.json next to the script/exe, or one level up."""
+    bases = []
+    if getattr(sys, "frozen", False):  # PyInstaller exe
+        bases.append(Path(sys.executable).resolve().parent)
+    here = Path(__file__).resolve().parent
+    bases += [here, here.parent]
+    for base in bases:
+        for extra in (base, base.parent):
+            candidate = extra / "firebase_config.json"
+            if candidate.is_file():
+                return candidate
+    return here / "firebase_config.json"
 
 
 # --------------------------------------------------------------------------
@@ -80,14 +92,15 @@ def s(value):  # Firestore string field
 
 
 def load_config():
-    if not CONFIG_PATH.is_file():
-        raise SystemExit(
-            f"Missing {CONFIG_PATH.name}. Copy "
-            "firebase_config.example.json to firebase_config.json and "
-            "fill in your Firebase project's apiKey and projectId.")
-    cfg = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+    path = _config_path()
+    if not path.is_file():
+        raise AgentError(
+            "Missing firebase_config.json — copy "
+            "firebase_config.example.json next to the agent and fill in "
+            "the group's apiKey and projectId.")
+    cfg = json.loads(path.read_text(encoding="utf-8"))
     if not cfg.get("apiKey") or not cfg.get("projectId"):
-        raise SystemExit("firebase_config.json needs both apiKey and "
+        raise AgentError("firebase_config.json needs both apiKey and "
                          "projectId.")
     return cfg
 
@@ -164,7 +177,7 @@ def field_str(doc, name):
 def require_lcu():
     lcu = lsm.find_lcu()
     if lcu is None:
-        raise SystemExit("No running League client found — open League, "
+        raise AgentError("No running League client found — open League, "
                          "log in, and try again.")
     return lcu
 
@@ -237,23 +250,25 @@ def compute_suggestions(gd, libraries, blocked_names, pinned):
 
 
 # --------------------------------------------------------------------------
-# Commands
+# Core actions (shared by CLI and GUI)
 # --------------------------------------------------------------------------
 
-def cmd_upload(args):
+def do_upload(log=print, dry_run=False):
+    """Export from the client and upload to Firestore. Returns (player,
+    skin count)."""
     lcu = require_lcu()
     summoner = lcu.get("/lol-summoner/v1/current-summoner")
     puuid = summoner.get("puuid")
     if not puuid:
-        raise SystemExit("Couldn't read your PUUID from the client.")
-    gd = lsm.load_game_data(print)
+        raise AgentError("Couldn't read your PUUID from the client.")
+    gd = lsm.load_game_data(log)
     export = lsm.export_my_skins(gd)
     blob = json.dumps(export)
-    print(f"{export['player']}: {len(export['skins'])} skins, "
-          f"{len(blob) / 1024:.0f} KB")
-    if args.dry_run:
-        print(f"[dry-run] would write libraries/{puuid}")
-        return
+    log(f"{export['player']}: {len(export['skins'])} skins, "
+        f"{len(blob) / 1024:.0f} KB")
+    if dry_run:
+        log(f"[dry-run] would write libraries/{puuid}")
+        return export["player"], len(export["skins"])
     cfg = load_config()
     auth = sign_in(cfg)
     fs_set(cfg, auth, f"libraries/{puuid}", {
@@ -262,27 +277,32 @@ def cmd_upload(args):
         "updatedAt": s(now_iso()),
         "data": s(blob),
     })
-    print("Uploaded! Your friends' captain can now pull your library "
-          "automatically. Re-run this after you buy new skins.")
+    log("Uploaded! Re-run after you buy new skins.")
+    return export["player"], len(export["skins"])
 
 
-def cmd_watch(args):
+def watch_loop(log=print, stop=None, dry_run=False, on_link=None):
+    """Captain mode. Runs until `stop` (threading.Event) is set."""
+    stop = stop or threading.Event()
     cfg = auth = None
-    if not args.dry_run:
+    if not dry_run:
         cfg = load_config()
         auth = sign_in(cfg)
     lcu = require_lcu()
     summoner = lcu.get("/lol-summoner/v1/current-summoner")
     captain = summoner.get("puuid")
-    gd = lsm.load_game_data(print)
+    gd = lsm.load_game_data(log)
     party_path = f"parties/{captain}"
-    if not args.dry_run and cfg.get("webUrl"):
-        print(f"\nParty page: {cfg['webUrl']}?party={captain}\n")
+    if not dry_run and cfg.get("webUrl"):
+        link = f"{cfg['webUrl']}/?party={captain}"
+        log(f"Party page: {link}")
+        if on_link:
+            on_link(link)
     libraries_cache = {}
     last_pushed = None
-    print("Watching your lobby — Ctrl+C to stop.")
+    log("Watching your lobby...")
 
-    while True:
+    while not stop.is_set():
         try:
             members = lobby_members(lcu) or [{
                 "puuid": captain,
@@ -290,7 +310,7 @@ def cmd_watch(args):
 
             libs, missing = [], []
             for m in members:
-                if m["puuid"] not in libraries_cache and not args.dry_run:
+                if m["puuid"] not in libraries_cache and not dry_run:
                     doc = fs_get(cfg, auth, f"libraries/{m['puuid']}")
                     blob = field_str(doc, "data")
                     libraries_cache[m["puuid"]] = \
@@ -305,11 +325,12 @@ def cmd_watch(args):
             cs = champ_select(lcu)
             phase = "champ select" if cs else "lobby"
             blocked, enemy_picks, pinned = set(), [], {}
+            bans = []
             if cs:
                 ban_ids = (cs.get("bans", {}).get("myTeamBans", [])
                            + cs.get("bans", {}).get("theirTeamBans", []))
-                bans = [gd.champ_names.get(cid) for cid in ban_ids]
-                bans = [b for b in bans if b]
+                bans = [b for b in (gd.champ_names.get(cid)
+                                    for cid in ban_ids) if b]
                 enemy_ids = [t.get("championId")
                              for t in cs.get("theirTeam", [])
                              if t.get("championId")]
@@ -323,8 +344,6 @@ def cmd_watch(args):
                     player = name_by_puuid.get(t.get("puuid"))
                     if champ and player:
                         pinned[player] = champ
-            else:
-                bans = []
 
             suggestions = compute_suggestions(gd, libs, blocked, pinned) \
                 if len(libs) >= 2 else []
@@ -343,39 +362,209 @@ def cmd_watch(args):
             }
             snapshot = json.dumps(state, sort_keys=True)
             if snapshot != last_pushed:
-                if args.dry_run:
-                    print(f"[dry-run] {phase}: {len(members)} member(s), "
-                          f"{len(suggestions)} suggestion(s), "
-                          f"missing: {missing or 'none'}")
+                if dry_run:
+                    log(f"[dry-run] {phase}: {len(members)} member(s), "
+                        f"{len(suggestions)} suggestion(s), "
+                        f"missing: {missing or 'none'}")
                 else:
                     fs_set(cfg, auth, party_path, {
                         "state": s(snapshot),
                         "captain": s(captain),
                         "updatedAt": s(now_iso()),
                     })
-                    print(f"pushed: {phase}, {len(members)} member(s), "
-                          f"{len(suggestions)} playable line(s)")
+                    log(f"pushed: {phase}, {len(members)} member(s), "
+                        f"{len(suggestions)} playable line(s)")
                 last_pushed = snapshot
-        except KeyboardInterrupt:
-            raise
         except Exception as exc:
-            print(f"(retrying) {exc}")
-        time.sleep(POLL_SECONDS)
+            log(f"(retrying) {exc}")
+        stop.wait(POLL_SECONDS)
+    log("Stopped watching.")
 
+
+# --------------------------------------------------------------------------
+# Mini GUI (default when double-clicked)
+# --------------------------------------------------------------------------
+
+def run_gui():
+    import tkinter as tk
+    from tkinter import ttk
+
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            ctypes.windll.shcore.SetProcessDpiAwareness(1)
+        except Exception:
+            pass
+
+    root = tk.Tk()
+    root.title(AGENT_TITLE)
+    root.resizable(False, False)
+    try:
+        root.iconphoto(True, tk.PhotoImage(data=lsm.APP_ICON_PNG_B64))
+    except Exception:
+        pass
+
+    events = queue.Queue()
+    state = {"busy": False, "stop": None, "link": None}
+
+    frame = ttk.Frame(root, padding=16)
+    frame.pack(fill="both", expand=True)
+
+    ttk.Label(frame, text="LoLSkinMatcher Agent",
+              font=("Segoe UI Semibold", 14)).pack(anchor="w")
+    ttk.Label(frame, text="Keep it simple: upload once, watch when "
+                          "you're the captain.",
+              foreground="#666").pack(anchor="w", pady=(0, 12))
+
+    btn_upload = ttk.Button(frame, text="⬆  Upload my library")
+    btn_upload.pack(fill="x", pady=(0, 6))
+
+    watch_var = tk.BooleanVar(value=False)
+    chk_watch = ttk.Checkbutton(
+        frame, text="👁  Watch live lobby (captain mode)",
+        variable=watch_var)
+    chk_watch.pack(anchor="w", pady=(0, 10))
+
+    link_row = ttk.Frame(frame)
+    link_row.pack(fill="x", pady=(0, 8))
+    link_var = tk.StringVar(value="Party link appears when watching…")
+    ttk.Entry(link_row, textvariable=link_var, state="readonly",
+              width=46).pack(side="left", fill="x", expand=True)
+
+    def copy_link():
+        if state["link"]:
+            root.clipboard_clear()
+            root.clipboard_append(state["link"])
+            log_line("Link copied — paste it in the group chat.")
+
+    def open_link():
+        if state["link"]:
+            webbrowser.open(state["link"])
+
+    ttk.Button(link_row, text="Copy", width=6, command=copy_link
+               ).pack(side="left", padx=(6, 0))
+    ttk.Button(link_row, text="Open", width=6, command=open_link
+               ).pack(side="left", padx=(4, 0))
+
+    log_box = tk.Text(frame, height=9, width=58, state="disabled",
+                      relief="flat", background="#f7f7f7",
+                      font=("Consolas", 9))
+    log_box.pack(fill="both", expand=True)
+
+    def log_line(msg):
+        log_box.configure(state="normal")
+        log_box.insert("end", f"{msg}\n")
+        log_box.see("end")
+        log_box.configure(state="disabled")
+
+    def gui_log(msg):  # thread-safe
+        events.put(("log", str(msg)))
+
+    # ---- upload -----------------------------------------------------
+    def start_upload():
+        if state["busy"]:
+            return
+        state["busy"] = True
+        btn_upload.configure(state="disabled", text="Uploading…")
+
+        def worker():
+            try:
+                player, n = do_upload(log=gui_log)
+                events.put(("upload_done", f"{player} — {n} skins"))
+            except AgentError as exc:
+                events.put(("upload_err", str(exc)))
+            except Exception as exc:
+                events.put(("upload_err", f"Unexpected error: {exc!r}"))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    btn_upload.configure(command=start_upload)
+
+    # ---- watch toggle -------------------------------------------------
+    def toggle_watch():
+        if watch_var.get():
+            stop = threading.Event()
+            state["stop"] = stop
+
+            def worker():
+                try:
+                    watch_loop(log=gui_log, stop=stop,
+                               on_link=lambda url:
+                               events.put(("link", url)))
+                except AgentError as exc:
+                    events.put(("watch_err", str(exc)))
+                except Exception as exc:
+                    events.put(("watch_err",
+                                f"Unexpected error: {exc!r}"))
+
+            threading.Thread(target=worker, daemon=True).start()
+        else:
+            if state["stop"]:
+                state["stop"].set()
+                state["stop"] = None
+
+    chk_watch.configure(command=toggle_watch)
+
+    def poll():
+        try:
+            while True:
+                kind, payload = events.get_nowait()
+                if kind == "log":
+                    log_line(payload)
+                elif kind == "upload_done":
+                    state["busy"] = False
+                    btn_upload.configure(state="normal",
+                                         text="⬆  Upload my library")
+                    log_line(f"Done: {payload}")
+                elif kind == "upload_err":
+                    state["busy"] = False
+                    btn_upload.configure(state="normal",
+                                         text="⬆  Upload my library")
+                    log_line(f"Upload failed: {payload}")
+                elif kind == "link":
+                    state["link"] = payload
+                    link_var.set(payload)
+                elif kind == "watch_err":
+                    log_line(f"Watch failed: {payload}")
+                    watch_var.set(False)
+        except queue.Empty:
+            pass
+        root.after(150, poll)
+
+    def on_close():
+        if state["stop"]:
+            state["stop"].set()
+        root.destroy()
+
+    root.protocol("WM_DELETE_WINDOW", on_close)
+    log_line("Ready. League client must be open for either action.")
+    root.after(150, poll)
+    root.mainloop()
+
+
+# --------------------------------------------------------------------------
 
 def main(argv=None):
     parser = argparse.ArgumentParser(
         description="League Skin Matcher sync agent")
-    parser.add_argument("command", choices=["upload", "watch"])
+    parser.add_argument("command", nargs="?",
+                        choices=["upload", "watch", "gui"],
+                        help="omit (or double-click the file) for the "
+                             "mini app window")
     parser.add_argument("--dry-run", action="store_true",
                         help="don't touch Firestore; print what would "
                              "happen")
     args = parser.parse_args(argv)
     try:
         if args.command == "upload":
-            cmd_upload(args)
+            do_upload(dry_run=args.dry_run)
+        elif args.command == "watch":
+            watch_loop(dry_run=args.dry_run)
         else:
-            cmd_watch(args)
+            run_gui()
+    except AgentError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
     except KeyboardInterrupt:
         print("\nStopped.")
     return 0
