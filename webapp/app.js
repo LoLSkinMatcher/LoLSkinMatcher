@@ -138,7 +138,7 @@ if (params.get("demo")) {
         if (!doc.exists) {
           $("#empty").hidden = false;
           $("#empty").textContent =
-            "No party found — is the captain's agent running?";
+            "No party found — is the captain's companion running?";
           return;
         }
         render(JSON.parse(doc.data().state || "{}"));
@@ -157,7 +157,7 @@ if (params.get("demo")) {
         <li><b>Everyone, once:</b> open the League client and run the
           uploader — your skin library syncs automatically. Re-run it
           when you buy skins.</li>
-        <li><b>The captain, each session:</b> run the agent in watch
+        <li><b>The captain, each session:</b> run the companion in watch
           mode before queueing. It prints this page's link with your
           party code.</li>
         <li><b>Everyone:</b> open that link. This page follows your

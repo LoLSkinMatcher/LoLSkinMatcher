@@ -7,13 +7,13 @@ can play — live, during champ select.
 ```
  friend's PC                     Firebase                    everyone
 ┌───────────────┐   upload    ┌──────────────┐   subscribe  ┌─────────┐
-│ lsm_agent.py  │ ──────────▶ │  Firestore   │ ◀─────────── │ web app │
+│ lsm_companion.py  │ ──────────▶ │  Firestore   │ ◀─────────── │ web app │
 │ (runs once)   │  libraries/ │              │   parties/   │ (browser)│
 └───────────────┘   {puuid}   │  libraries/  │    {code}    └─────────┘
                               │  parties/    │
 ┌───────────────┐  push state │              │
 │ captain's PC  │ ──────────▶ └──────────────┘
-│ lsm_agent.py  │   reads LCU: lobby members, champ select
+│ lsm_companion.py  │   reads LCU: lobby members, champ select
 │ watch (stays  │   pulls party libraries, computes comps,
 │  running)     │   reacts to bans/enemy picks live
 └───────────────┘
@@ -21,10 +21,10 @@ can play — live, during champ select.
 
 ## Pieces
 
-- **`debug/lsm_agent.py upload`** — one-shot. Reads your skins + PUUID from the
+- **`debug/lsm_companion.py upload`** — one-shot. Reads your skins + PUUID from the
   League client, uploads to `libraries/{puuid}`, exits. Run it again when
   you buy skins. This replaces trading JSON files.
-- **`debug/lsm_agent.py watch`** — captain mode, the only long-running process.
+- **`debug/lsm_companion.py watch`** — captain mode, the only long-running process.
   Polls the LCU every 3s: lobby members → fetches their libraries from
   Firestore → champ select session → removes banned + enemy-picked
   champions from everyone's pools, pins locked-in teammates → runs the
@@ -38,8 +38,8 @@ can play — live, during champ select.
 
 ## Identity & security
 
-- **No sign-in**: Firebase Anonymous Auth. The agent creates a silent
-  token on first run (cached in `~/.lsm_agent_auth.json`); the web page
+- **No sign-in**: Firebase Anonymous Auth. The companion creates a silent
+  token on first run (cached in `~/.lsm_companion_auth.json`); the web page
   does the same in the browser. Nobody types anything.
 - Players are keyed by **PUUID** (Riot's stable player id, read from the
   local client) — no usernames to manage, and lobby membership gives the
@@ -47,7 +47,7 @@ can play — live, during champ select.
 - `firestore.rules` requires auth for all access, enforces document
   shape, and caps sizes. Treat the data as semi-public: it's skin lists.
   The privacy pitch changes from "nothing leaves your PC" to "your skin
-  list syncs to the group's database" — the agent must stay opt-in.
+  list syncs to the group's database" — the companion must stay opt-in.
 - The Firebase web `apiKey` is public by design; rules are the security
   boundary. Consider enabling App Check later.
 
@@ -58,13 +58,13 @@ can play — live, during champ select.
 3. Build → Firestore Database → create (production mode), then paste
    `firestore.rules` into the Rules tab.
 4. Project settings → add a **Web app** → copy the config values into
-   `firebase_config.json` (agent) and `webapp/config.js` (page).
+   `firebase_config.json` (companion) and `webapp/config.js` (page).
 5. Hosting: `npm i -g firebase-tools && firebase deploy` from the repo
    (or just open `webapp/index.html` locally while prototyping).
 
 ## Later phases / open questions
 
-- Auto-run the upload agent on PC start (tray icon?), so libraries are
+- Auto-run the upload companion on PC start (tray icon?), so libraries are
   always fresh without anyone thinking about it.
 - Party codes shorter than a PUUID (hash prefix) for prettier links.
 - Counter-pick-aware suggestions need a matchup data source — parked.
