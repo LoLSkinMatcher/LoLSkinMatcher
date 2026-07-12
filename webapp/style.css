@@ -108,21 +108,53 @@ h2 {
 .card {
   background: linear-gradient(180deg, var(--panel-2), var(--panel));
   border: 1px solid var(--line);
-  border-left: 4px solid var(--accent, var(--gold));
   border-radius: 14px;
-  padding: 16px 18px;
+  overflow: hidden;
   transition: transform 0.12s ease, border-color 0.12s ease;
 }
 .card:hover { transform: translateY(-2px); border-color: #2c3b4c; }
 
-.card h3 {
-  font-size: 16px;
-  margin-bottom: 10px;
+/* splash-art banner header */
+.banner {
+  position: relative;
+  height: 84px;
+  background-size: cover;
+  background-position: center 22%;
+  border-bottom: 2px solid var(--accent, var(--gold));
   display: flex;
-  align-items: center;
-  gap: 8px;
+  align-items: flex-end;
+  padding: 10px 16px;
 }
-.card h3 .emoji { font-size: 15px; }
+.banner.banner-plain {
+  height: 52px;
+  background: linear-gradient(90deg,
+              color-mix(in srgb, var(--accent) 40%, var(--panel)),
+              var(--panel));
+}
+.banner-title {
+  font-size: 18px;
+  font-weight: 700;
+  color: #fff;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.9);
+  letter-spacing: 0.3px;
+}
+.banner-badge {
+  margin-left: auto;
+  align-self: center;
+  font-size: 12px;
+  color: #e8e6e3;
+  background: rgba(10, 14, 19, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
+  padding: 3px 10px;
+  white-space: nowrap;
+}
+.card.aram-full .banner-badge {
+  color: #0a0e13; background: var(--gold); font-weight: 700;
+  border-color: var(--gold);
+}
+
+.card-body { padding: 14px 18px; }
 
 .seat {
   display: flex;
@@ -146,7 +178,16 @@ h2 {
 .seat .who { color: var(--dim); font-size: 12px; margin-left: auto; }
 
 .card.blocked { opacity: 0.6; }
-.card.blocked h3::after { content: " — no full comp"; color: var(--red); font-size: 12px; }
+.card.blocked .banner::after {
+  content: "no full comp";
+  position: absolute;
+  top: 8px; right: 12px;
+  font-size: 11px;
+  color: #fff;
+  background: rgba(232, 64, 87, 0.85);
+  border-radius: 6px;
+  padding: 2px 7px;
+}
 
 .cardnote { color: var(--dim); font-size: 13px; padding-top: 4px; }
 
