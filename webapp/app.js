@@ -396,18 +396,21 @@ DEMO.suggestions = [
     };
   })(),
   (() => {
-    // a 4/5: four can run Pool Party, aesuki has no library so sits out
+    // a "switch" card: StallionPrime is in the lobby, but this line only
+    // works if they hop to Mike Oxmaul — so that row is shown as Mike.
+    const players = DEMO_PLAYERS.map((p) =>
+      p.name === "StallionPrime#9125" ? { name: "Mike Oxmaul#NA5" } : p);
     const comp = [
       { role: "Top", player: "RubixQber#ayaya", champ: "Gragas", champId: 79 },
-      { role: "Jungle", player: "StallionPrime#9125", champ: "Rek'Sai", champId: 421 },
+      { role: "Jungle", player: "Mike Oxmaul#NA5", champ: "Rek'Sai", champId: 421 },
       { role: "Mid", player: "Jhin Blossoms#Jhin", champ: "Fizz", champId: 105 },
       { role: "Bot", player: "POG Fennel#68419", champ: "Miss Fortune", champId: 21 },
     ];
     return {
       line: "Pool Party", emoji: "🏖", color: "#1fc3c3", ok: true,
       access: "switch", switchTo: "Mike Oxmaul#NA5", comp,
-      grid: demoGrid(DEMO_PLAYERS, comp, {
-        "StallionPrime#9125": [{ role: "Support", champ: "Taric", champId: 44 }],
+      grid: demoGrid(players, comp, {
+        "Mike Oxmaul#NA5": [{ role: "Support", champ: "Taric", champId: 44 }],
         "POG Fennel#68419": [{ role: "Support", champ: "Zac", champId: 154 }],
       }),
     };
