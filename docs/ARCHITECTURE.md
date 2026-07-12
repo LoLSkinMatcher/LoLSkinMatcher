@@ -41,7 +41,10 @@ can play — live, during champ select.
   a realtime listener on the party document. Renders party chips, bans,
   enemy picks, and comp cards with champion icons. `?demo=1` shows
   canned data with no Firebase needed (UI development / screenshots).
-- **The desktop app (v1.x)** keeps working unchanged for offline use.
+- **`league_skin_matcher.py`** — the shared engine (data loading, skin
+  matching, LCU access, skinline styling) that the Companion imports. It
+  also still contains the deprecated v1 desktop GUI, runnable from source
+  (`python league_skin_matcher.py`) but no longer shipped as an exe.
 
 ## Identity & security
 
