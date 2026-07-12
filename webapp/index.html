@@ -19,7 +19,15 @@
       <p class="tag">Because we don't win unless it's in style.</p>
     </div>
   </div>
-  <div id="phase" class="phase">connecting…</div>
+  <div class="header-right">
+    <nav class="links">
+      <a href="https://github.com/LoLSkinMatcher/LoLSkinMatcher/raw/main/release/LSMCompanion.exe"
+         download>⬇ Companion (.exe)</a>
+      <a href="https://github.com/LoLSkinMatcher/LoLSkinMatcher"
+         target="_blank" rel="noopener">GitHub</a>
+    </nav>
+    <div id="phase" class="phase">connecting…</div>
+  </div>
 </header>
 
 <main>
@@ -35,7 +43,17 @@
   </section>
 
   <section>
-    <h2 id="section-title">Skinline comps you can still play</h2>
+    <div class="section-head">
+      <h2 id="section-title">Skinline comps you can still play</h2>
+      <div id="filter" class="filter" hidden>
+        <input id="champ-filter" type="text" list="champ-list"
+               placeholder="Only skinlines with…" autocomplete="off"
+               spellcheck="false">
+        <datalist id="champ-list"></datalist>
+        <button id="filter-clear" type="button" title="Clear filter"
+                hidden>×</button>
+      </div>
+    </div>
     <div id="cards" class="cards"></div>
     <p id="empty" class="empty" hidden>Waiting for the captain's companion…</p>
   </section>

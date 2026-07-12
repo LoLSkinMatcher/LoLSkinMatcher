@@ -45,8 +45,12 @@ except Exception:
 
 AUTH_CACHE = Path.home() / ".lsm_companion_auth.json"
 POLL_SECONDS = 3
-MAX_SUGGESTIONS = 12
-COMPANION_VERSION = "2.0"
+# Every shared skinline is shown. STATE_BUDGET is only a safety net: the
+# Firestore rules cap the party doc's `state` string (see firestore.rules),
+# so if a very large group would overflow it we trim the lowest-priority
+# cards rather than let the write be rejected and stall the page.
+STATE_BUDGET = 190000
+COMPANION_VERSION = "2.1"
 APP_TITLE = f"LoLSkinMatcher Companion  v{COMPANION_VERSION}"
 
 # The group's Firebase project, baked in so the exe works on its own.
@@ -252,10 +256,17 @@ def compute_suggestions(gd, libraries, blocked_names, pinned):
     blocked_names: champions removed from everyone's pools (bans + enemy
     picks). pinned: {player_name: champion} for teammates already locked
     in — lines that can't seat their lock are dropped.
+
+    Only lines that yield a real comp are returned. A line is shown when
+    a comp seats EVERYONE; for a full five-stack it may instead show a
+    4/5 comp (one player off theme). Lines with no such comp are dropped
+    rather than shown as "no full comp" — that clutter lives only in the
+    grid you'd never play. (ARAM uses compute_aram, which keeps partials.)
     """
     matrix = lsm.build_matrix(libraries)
     mastery = {lib.player: lib.mastery for lib in libraries}
     order = [lib.player for lib in libraries]
+    total = len(order)
     out = []
     for line, per_player in matrix.items():
         if len(per_player) != len(libraries):
@@ -268,16 +279,28 @@ def compute_suggestions(gd, libraries, blocked_names, pinned):
             if lock:
                 pool = [lock] if lock in pool else []
             pools[player] = pool
-        # a full comp is only possible if nobody has an empty pool
+
+        # Prefer a comp that seats everyone. If that's impossible and the
+        # party is a full five-stack, fall back to a 4/5 comp (one player
+        # sits out the theme). Smaller parties only ever show a complete
+        # comp; anything less is dropped, not badged.
         comp = None
         if all(pools[p] for p in order):
             comp = lsm.find_team_comp(pools, gd.champ_positions, mastery)
-        picks = {(p, role, champ)
-                 for p, (champ, role) in (comp or {}).items()}
+        if comp is None and total == 5:
+            for sit_out in order:
+                sub = {p: pools[p] for p in order if p != sit_out}
+                comp = lsm.find_team_comp(sub, gd.champ_positions, mastery)
+                if comp:
+                    break
+        if not comp:
+            continue
+        seated = len(comp)
+        picks = {(p, role, champ) for p, (champ, role) in comp.items()}
 
         # the 5x5 grid: for each player (row) and lane (column), every
         # champion they can play there, mastery-sorted, marking the
-        # suggested pick
+        # suggested pick (the off-theme player, if any, has no pick)
         grid = []
         for player in order:
             m = mastery.get(player, {})
@@ -296,15 +319,16 @@ def compute_suggestions(gd, libraries, blocked_names, pinned):
         emoji, color = lsm.style_for(line)
         out.append({
             "line": line, "emoji": emoji, "color": color,
-            "ok": comp is not None,
+            "ok": seated == total,
+            "seated": seated,
+            "total": total,
             "comp": [{"role": role, "player": player, "champ": champ,
                       "champId": gd.champ_ids.get(champ)}
-                     for player, (champ, role) in comp.items()]
-            if comp else None,
+                     for player, (champ, role) in comp.items()],
             "grid": grid,
         })
     out.sort(key=lambda r: (not r["ok"], r["line"].lower()))
-    return out[:MAX_SUGGESTIONS]
+    return out
 
 
 def max_assignment(player_champs):
@@ -371,7 +395,22 @@ def compute_aram(gd, libraries, rolled_by_name, bench_names):
                                    key=lambda kv: kv[0])],
         })
     out.sort(key=lambda r: (not r["full"], -r["count"], r["line"].lower()))
-    return out[:MAX_SUGGESTIONS]
+    return out
+
+
+def fit_state(state, budget=STATE_BUDGET):
+    """Keep the pushed party state under the Firestore rules' size cap.
+
+    Cards are already sorted best-first (full comps / fuller ARAM matches
+    first), so if an unusually large shared library would overflow the doc
+    we drop the lowest-priority cards until it fits, rather than letting the
+    write get rejected and freeze the page. Normal friend-group parties are
+    well under budget and untouched.
+    """
+    key = "aram" if state.get("aramMode") else "suggestions"
+    while state.get(key) and len(json.dumps(state, sort_keys=True)) > budget:
+        state[key] = state[key][:-1]
+    return state
 
 
 # --------------------------------------------------------------------------
@@ -564,7 +603,7 @@ def watch_loop(log=print, stop=None, dry_run=False, on_link=None):
                 compute_suggestions(gd, libs, blocked, pinned)
                 if len(libs) >= 2 else [])
 
-            push({
+            push(fit_state({
                 "phase": phase,
                 "aramMode": bool(aram),
                 "companionVersion": COMPANION_VERSION,
@@ -578,7 +617,7 @@ def watch_loop(log=print, stop=None, dry_run=False, on_link=None):
                 "pinned": pinned,
                 "suggestions": suggestions,
                 "aram": aram_results,
-            })
+            }))
         except urllib.error.URLError:
             # client (or network) dropped mid-tick; reconnect next tick
             lcu = None
@@ -814,6 +853,69 @@ def selftest():
                         bench_names=["Garen"])
     check("ARAM no match when pool has no owned line champ",
           not any(r["line"] == "Star Guardian" for r in res2))
+
+    # every shared skinline is shown (no arbitrary count cap) -- this is the
+    # bug where Pool Party went missing because only 12 lines were returned
+    many = {i: f"Line {i:02d}" for i in range(1, 21)}   # 20 skinlines
+    gd_many = lsm.GameData(many, {99: "Lux", 222: "Jinx"},
+                           {"Lux": {"Mid"}, "Jinx": {"Bot"}})
+    la2 = lsm.Library("A", [{"id": 99000 + i, "name": "s",
+                             "champion": "Lux", "skinlines": [many[i]]}
+                            for i in range(1, 21)])
+    lb2 = lsm.Library("B", [{"id": 222000 + i, "name": "s",
+                             "champion": "Jinx", "skinlines": [many[i]]}
+                            for i in range(1, 21)])
+    sug_all = compute_suggestions(gd_many, [la2, lb2], set(), {})
+    check("every shared skinline is shown (no 12-line cap)",
+          len(sug_all) == 20)
+
+    # a line with no full comp is DROPPED (not shown as "no full comp"):
+    # two players who both only own the same single champion can't field a
+    # distinct duo.
+    gd_solo = lsm.GameData({1: "Solo Line"}, {99: "Lux"}, {"Lux": {"Mid"}})
+    lx = lsm.Library("A", [{"id": 1, "name": "s", "champion": "Lux",
+                            "skinlines": ["Solo Line"]}])
+    ly = lsm.Library("B", [{"id": 2, "name": "s", "champion": "Lux",
+                            "skinlines": ["Solo Line"]}])
+    check("no-full-comp line is hidden (2 players, same champ)",
+          not any(r["line"] == "Solo Line"
+                  for r in compute_suggestions(gd_solo, [lx, ly], set(), {})))
+
+    # a full five-stack that can't seat everyone falls back to a 4/5 comp;
+    # the same line for a 4-stack is a complete 4/4 comp (ok).
+    gd5 = lsm.GameData({1: "Squad Line"},
+                       {266: "Aatrox", 60: "Elise", 103: "Ahri", 22: "Ashe"},
+                       {"Aatrox": {"Top"}, "Elise": {"Jungle"},
+                        "Ahri": {"Mid"}, "Ashe": {"Bot"}})
+
+    def one(name, champ, cid):
+        return lsm.Library(name, [{"id": cid, "name": "s",
+                                   "champion": champ,
+                                   "skinlines": ["Squad Line"]}])
+    five = [one("P1", "Aatrox", 266000), one("P2", "Elise", 60000),
+            one("P3", "Ahri", 103000), one("P4", "Ashe", 22000),
+            one("P5", "Aatrox", 266001)]   # P5 collides with P1 -> only 4 seat
+    sl5 = [r for r in compute_suggestions(gd5, five, set(), {})
+           if r["line"] == "Squad Line"]
+    check("five-stack shows a 4/5 comp when a full comp is impossible",
+          bool(sl5) and sl5[0]["seated"] == 4 and sl5[0]["total"] == 5
+          and not sl5[0]["ok"])
+    sl4 = [r for r in compute_suggestions(gd5, five[:4], set(), {})
+           if r["line"] == "Squad Line"]
+    check("four-stack shows a complete 4/4 comp (not a partial)",
+          bool(sl4) and sl4[0]["ok"] and sl4[0]["seated"] == 4
+          and sl4[0]["total"] == 4)
+
+    # fit_state: a huge state is trimmed to fit; a normal one is untouched
+    big = fit_state({"aramMode": False, "suggestions": list(sug_all),
+                     "aram": []}, budget=3000)
+    check("fit_state trims oversized state under budget",
+          len(json.dumps(big, sort_keys=True)) <= 3000
+          and 0 < len(big["suggestions"]) < 20)
+    small = {"aramMode": False, "suggestions": list(sug_all[:3]), "aram": []}
+    fit_state(small, budget=STATE_BUDGET)
+    check("fit_state leaves an in-budget state untouched",
+          len(small["suggestions"]) == 3)
 
     print()
     if failures:

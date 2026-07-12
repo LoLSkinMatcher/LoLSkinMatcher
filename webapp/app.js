@@ -57,7 +57,64 @@ function makeCard(line, color, extraClass, featureChamp) {
   return { card, body, banner };
 }
 
-function render(state) {
+/* ---------------- champion filter (local to this page) ---------------- */
+
+let lastState = null;   // last rendered state, so filter changes can re-render
+let lastStamp = "";     // "updated" time, kept across filter-only re-renders
+
+function champsInSuggestion(sug) {
+  const names = new Set();
+  (sug.comp || []).forEach((s) => s.champ && names.add(s.champ));
+  (sug.grid || []).forEach((row) => {
+    Object.values(row.cells || {}).forEach((list) =>
+      (list || []).forEach((c) => c.champ && names.add(c.champ)));
+  });
+  return names;
+}
+
+function champsInAram(r) {
+  const names = new Set();
+  (r.assignment || []).forEach((s) => s.champ && names.add(s.champ));
+  return names;
+}
+
+function activeFilter() {
+  return $("#champ-filter").value.trim().toLowerCase();
+}
+function filterText() {
+  return $("#champ-filter").value.trim();
+}
+function matchesFilter(names, filter) {
+  if (!filter) return true;
+  for (const n of names) if (n.toLowerCase().includes(filter)) return true;
+  return false;
+}
+
+/* fill the autocomplete with every champion playable in the current data,
+   without clobbering the list (and the user's typing) when unchanged */
+function populateChampList(names) {
+  const uniq = [...new Set(names)].sort((a, b) => a.localeCompare(b));
+  const list = $("#champ-list");
+  const sig = uniq.join("|");
+  if (list.dataset.sig === sig) return;
+  list.dataset.sig = sig;
+  list.replaceChildren();
+  uniq.forEach((n) => {
+    const opt = document.createElement("option");
+    opt.value = n;
+    list.append(opt);
+  });
+}
+
+function setStatus(state, keepStamp) {
+  if (!keepStamp) lastStamp = new Date().toLocaleTimeString();
+  const ver = state.companionVersion
+    ? `  ·  captain's companion v${state.companionVersion}` : "";
+  $("#status").textContent = `updated ${lastStamp}${ver}`;
+}
+
+function render(state, keepStamp) {
+  lastState = state;
   $("#phase").textContent = state.phase || "lobby";
 
   const members = $("#members");
@@ -94,12 +151,18 @@ function render(state) {
   if (state.aramMode) {
     $("#section-title").textContent = "ARAM skinline roulette 🎲";
     cards.className = "cards aram-cards";
-    const aram = state.aram || [];
+    const allAram = state.aram || [];
+    populateChampList(allAram.flatMap((r) => [...champsInAram(r)]));
+    $("#filter").hidden = allAram.length === 0;
+    const filter = activeFilter();
+    const aram = allAram.filter((r) => matchesFilter(champsInAram(r), filter));
     $("#empty").hidden = aram.length > 0;
     if (!aram.length) {
-      $("#empty").textContent =
-        "No skinline matches from the current rolls — reroll or grab "
-        + "from the bench and check again!";
+      $("#empty").textContent = filter && allAram.length
+        ? `No current roll lets ${filterText()} style — reroll, grab from `
+          + "the bench, or clear the filter."
+        : "No skinline matches from the current rolls — reroll or grab "
+          + "from the bench and check again!";
     }
     aram.forEach((r) => {
       const feature = r.assignment[0] && r.assignment[0].champ;
@@ -118,25 +181,38 @@ function render(state) {
       });
       cards.append(card);
     });
-    const ver = state.companionVersion
-      ? `  ·  captain's companion v${state.companionVersion}` : "";
-    $("#status").textContent =
-      `updated ${new Date().toLocaleTimeString()}${ver}`;
+    setStatus(state, keepStamp);
     return;
   }
 
   $("#section-title").textContent = "Skinline comps you can still play";
   cards.className = "cards";
-  const suggestions = state.suggestions || [];
+  // Only lines with a real comp are shown. Older companions may still send
+  // "no full comp" cards (comp: null) — drop those here too so the view is
+  // clean regardless of the captain's companion version.
+  const raw = state.suggestions || [];
+  const allSug = raw.filter((s) => s.comp && s.comp.length);
+  populateChampList(allSug.flatMap((s) => [...champsInSuggestion(s)]));
+  $("#filter").hidden = allSug.length === 0;
+  const draftFilter = activeFilter();
+  const suggestions = allSug.filter(
+    (s) => matchesFilter(champsInSuggestion(s), draftFilter));
   $("#empty").hidden = suggestions.length > 0;
   if (state.phase === "offline") {
     $("#empty").textContent =
       "The captain's League client is closed — live comps resume " +
       "when it's back.";
-  } else if (!suggestions.length) {
+  } else if (!raw.length) {
     $("#empty").textContent =
       "Waiting for comps — needs at least two uploaded libraries " +
       "in the party.";
+  } else if (!allSug.length) {
+    $("#empty").textContent =
+      "No full skinline comp is possible from the current pools yet.";
+  } else if (!suggestions.length) {
+    $("#empty").textContent =
+      `No shown comp fits ${filterText()} — try another champion ` +
+      "or clear the filter.";
   }
   const ROLES = ["Top", "Jungle", "Mid", "Bot", "Support"];
   const ROLE_SHORT = { Top: "Top", Jungle: "JG", Mid: "Mid", Bot: "Bot",
@@ -146,8 +222,13 @@ function render(state) {
     // banner reflects the suggested comp's first pick, so it matches
     // who's actually being played
     const feature = sug.comp && sug.comp[0] && sug.comp[0].champ;
-    const { card, body } = makeCard(
-      sug.line, sug.color, sug.ok ? "" : "blocked", feature);
+    const { card, body, banner } = makeCard(sug.line, sug.color, "", feature);
+    // a full five-stack may only manage a 4/5 comp (one player off theme) —
+    // flag it as a positive, not the old red "no full comp"
+    if (sug.total && sug.seated && sug.seated < sug.total) {
+      banner.append(el("span", "banner-badge",
+        `${sug.seated}/${sug.total} can style`));
+    }
 
     // 5x5 grid: players (rows) x lanes (columns), every champion each
     // player can play in that lane; the suggested pick is highlighted
@@ -194,18 +275,28 @@ function render(state) {
         row.append(el("span", "who", seat.player));
         body.append(row);
       });
-    } else if (!sug.ok) {
-      body.append(el("p", "cardnote",
-        "Owned by everyone, but no full role split is possible."));
     }
     cards.append(card);
   });
 
-  const ver = state.companionVersion
-    ? `  ·  captain's companion v${state.companionVersion}` : "";
-  $("#status").textContent =
-    `updated ${new Date().toLocaleTimeString()}${ver}`;
+  setStatus(state, keepStamp);
 }
+
+/* re-render (keeping the "updated" time) when the champion filter changes */
+(function wireFilter() {
+  const input = $("#champ-filter");
+  const clear = $("#filter-clear");
+  input.addEventListener("input", () => {
+    clear.hidden = !input.value.trim();
+    if (lastState) render(lastState, true);
+  });
+  clear.addEventListener("click", () => {
+    input.value = "";
+    clear.hidden = true;
+    input.focus();
+    if (lastState) render(lastState, true);
+  });
+})();
 
 /* build a grid from a comp + extra per-cell champions (demo helper) */
 function demoGrid(players, comp, extra) {
@@ -284,15 +375,23 @@ DEMO.suggestions = [
       }),
     };
   })(),
-  {
-    line: "Pool Party", emoji: "🏖", color: "#1fc3c3", ok: false,
-    comp: null,
-    grid: demoGrid(DEMO_PLAYERS, null, {
-      "Jhin Blossoms#Jhin": [{ role: "Bot", champ: "Miss Fortune", champId: 21 }],
-      "POG Fennel#68419": [{ role: "Bot", champ: "Miss Fortune", champId: 21 }],
-      "RubixQber#ayaya": [{ role: "Bot", champ: "Miss Fortune", champId: 21 }],
-    }),
-  },
+  (() => {
+    // a 4/5: four can run Pool Party, aesuki has no library so sits out
+    const comp = [
+      { role: "Top", player: "RubixQber#ayaya", champ: "Gragas", champId: 79 },
+      { role: "Jungle", player: "StallionPrime#9125", champ: "Rek'Sai", champId: 421 },
+      { role: "Mid", player: "Jhin Blossoms#Jhin", champ: "Fizz", champId: 105 },
+      { role: "Bot", player: "POG Fennel#68419", champ: "Miss Fortune", champId: 21 },
+    ];
+    return {
+      line: "Pool Party", emoji: "🏖", color: "#1fc3c3", ok: false,
+      seated: 4, total: 5, comp,
+      grid: demoGrid(DEMO_PLAYERS, comp, {
+        "StallionPrime#9125": [{ role: "Support", champ: "Taric", champId: 44 }],
+        "POG Fennel#68419": [{ role: "Support", champ: "Zac", champId: 154 }],
+      }),
+    };
+  })(),
 ];
 
 const DEMO_ARAM = {
@@ -379,6 +478,9 @@ if (params.get("demo") === "aram") {
           lobby and champ select live — bans and enemy picks update
           the comps in real time.</li>
       </ol>
+      <p class="hint"><a class="dl"
+        href="https://github.com/LoLSkinMatcher/LoLSkinMatcher/raw/main/release/LSMCompanion.exe"
+        download>⬇ Download the companion (.exe)</a></p>
       <p class="hint">Want a preview right now? <a href="?demo=1">See
       the demo</a>.</p>
     </div>`;
