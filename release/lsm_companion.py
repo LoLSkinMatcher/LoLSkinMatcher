@@ -269,6 +269,24 @@ def champ_select(lcu):
 # Suggestions (reuses the main app's solver, minus banned/taken champs)
 # --------------------------------------------------------------------------
 
+def _skin_index(libraries):
+    """{player: {(normalized_line, champ): skin_name}}, newest skin per
+    champion per line — lets the grid show the exact skin to equip (e.g.
+    'Queen of Diamonds Syndra' for a Highstakes Syndra, where the skin name
+    doesn't just echo the line + champion)."""
+    idx = {}
+    for lib in libraries:
+        per = idx.setdefault(lib.player, {})
+        for rec in lib.records:
+            champ, sid, name = rec["champion"], rec.get("id", 0), rec.get("name")
+            for line in rec["skinlines"]:
+                key = (lsm.normalize_skinline(line), champ)
+                prev = per.get(key)
+                if prev is None or sid > prev[0]:
+                    per[key] = (sid, name)
+    return {p: {k: v[1] for k, v in d.items()} for p, d in idx.items()}
+
+
 def compute_suggestions(gd, libraries, blocked_names, pinned):
     """Skinline comps still possible for these players.
 
@@ -283,6 +301,7 @@ def compute_suggestions(gd, libraries, blocked_names, pinned):
     grid you'd never play. (ARAM uses compute_aram, which keeps partials.)
     """
     matrix = lsm.build_matrix(libraries)
+    skins = _skin_index(libraries)
     mastery = {lib.player: lib.mastery for lib in libraries}
     order = [lib.player for lib in libraries]
     total = len(order)
@@ -331,6 +350,7 @@ def compute_suggestions(gd, libraries, blocked_names, pinned):
                     key=lambda c: (-m.get(c, 0), c))
                 cells[role] = [
                     {"champ": c, "champId": gd.champ_ids.get(c),
+                     "skin": skins.get(player, {}).get((line, c)),
                      "pick": (player, role, c) in picks}
                     for c in champs]
             grid.append({"player": player, "cells": cells})
@@ -342,7 +362,8 @@ def compute_suggestions(gd, libraries, blocked_names, pinned):
             "seated": seated,
             "total": total,
             "comp": [{"role": role, "player": player, "champ": champ,
-                      "champId": gd.champ_ids.get(champ)}
+                      "champId": gd.champ_ids.get(champ),
+                      "skin": skins.get(player, {}).get((line, champ))}
                      for player, (champ, role) in comp.items()],
             "grid": grid,
         })
@@ -433,6 +454,7 @@ def compute_aram(gd, libraries, rolled_by_name, bench_names):
     Returns matchable lines (>=2 players), full-party matches first.
     """
     matrix = lsm.build_matrix(libraries)   # {line: {player: owned champs}}
+    skins = _skin_index(libraries)
     party = [lib.player for lib in libraries]
     bench = set(bench_names)
     out = []
@@ -459,6 +481,7 @@ def compute_aram(gd, libraries, rolled_by_name, bench_names):
             "full": len(assign) == len(party),
             "assignment": [
                 {"player": p, "champ": c, "champId": gd.champ_ids.get(c),
+                 "skin": skins.get(p, {}).get((line, c)),
                  "source": "rolled" if rolled_by_name.get(p) == c
                  else "bench"}
                 for p, c in sorted(assign.items(),
@@ -1022,6 +1045,28 @@ def selftest():
     alt_players = {seat["player"] for seat in alt_comp}
     check("alt: switch card's comp/grid is labelled with the alt account",
           "A-ALT" in alt_players and "A" not in alt_players)
+
+    # skin names: cells/comp carry the exact skin to equip (matters when the
+    # skin name isn't just line + champion, e.g. Highstakes)
+    gd_sk = lsm.GameData({1: "Highstakes"},
+                         {134: "Syndra", 82: "Mordekaiser"},
+                         {"Syndra": {"Mid"}, "Mordekaiser": {"Top"}})
+    lp = lsm.Library("P", [{"id": 134001, "name": "Queen of Diamonds Syndra",
+                            "champion": "Syndra", "skinlines": ["Highstakes"]}])
+    lq = lsm.Library("Q", [{"id": 82001, "name": "King of Clubs Mordekaiser",
+                            "champion": "Mordekaiser",
+                            "skinlines": ["Highstakes"]}])
+    hs = [r for r in compute_suggestions(gd_sk, [lp, lq], set(), {})
+          if r["line"] == "Highstakes"]
+    comp_skins = {seat.get("skin") for seat in hs[0]["comp"]} if hs else set()
+    check("skin: comp carries the exact skin name",
+          {"Queen of Diamonds Syndra",
+           "King of Clubs Mordekaiser"} <= comp_skins)
+    cell_skin = next((c.get("skin") for row in hs[0]["grid"]
+                      for c in row["cells"]["Mid"] if c["champ"] == "Syndra"),
+                     None) if hs else None
+    check("skin: grid pick cell carries the skin name",
+          cell_skin == "Queen of Diamonds Syndra")
 
     # fit_state: a huge state is trimmed to fit; a normal one is untouched
     big = fit_state({"aramMode": False, "suggestions": list(sug_all),
