@@ -381,9 +381,9 @@ def compute_suggestions_with_alts(gd, party, blocked, pinned, fetch):
             if not data:
                 continue
             alt_name = data.get("player") or ap
-            # parse under the SAME seat name so the comp attributes to this
-            # person; alt_name is only for the "switch to X" label.
-            alt_lib = lsm.parse_library(data, gd, display_name=m["name"])
+            # parse under the ALT account's own name, so the grid/comp row
+            # shows the account you'd switch INTO (not the one in the lobby).
+            alt_lib = lsm.parse_library(data, gd, display_name=alt_name)
             alt_libs = [alt_lib if x is m["lib"] else x for x in base_libs]
             for s in compute_suggestions(gd, alt_libs, blocked, pinned):
                 if s["line"] in seen:
@@ -1018,6 +1018,10 @@ def selftest():
     check("alt: an alt-only line is flagged 'switch' to the alt account",
           by_line.get("AltLine", {}).get("access") == "switch"
           and by_line["AltLine"].get("switchTo") == "A-ALT")
+    alt_comp = by_line.get("AltLine", {}).get("comp") or []
+    alt_players = {seat["player"] for seat in alt_comp}
+    check("alt: switch card's comp/grid is labelled with the alt account",
+          "A-ALT" in alt_players and "A" not in alt_players)
 
     # fit_state: a huge state is trimmed to fit; a normal one is untouched
     big = fit_state({"aramMode": False, "suggestions": list(sug_all),
