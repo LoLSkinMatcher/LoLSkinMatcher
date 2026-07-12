@@ -58,7 +58,9 @@ can play — live, during champ select.
 3. Build → Firestore Database → create (production mode), then paste
    `firestore.rules` into the Rules tab.
 4. Project settings → add a **Web app** → copy the config values into
-   `firebase_config.json` (companion) and `webapp/config.js` (page).
+   `webapp/config.js` (page) and the companion's built-in
+   DEFAULT_CONFIG. Friends need nothing — the shipped exe carries the
+   group's config (a firebase_config.json beside it can override).
 5. Hosting: `npm i -g firebase-tools && firebase deploy` from the repo
    (or just open `webapp/index.html` locally while prototyping).
 

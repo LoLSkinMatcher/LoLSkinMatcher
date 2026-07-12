@@ -14,10 +14,11 @@ Console use still works for scripting:
     python lsm_companion.py upload   [--dry-run]
     python lsm_companion.py watch    [--dry-run]
 
-Setup: firebase_config.json (next to this file or in the repo root)
-with the group's apiKey + projectId — see firebase_config.example.json.
-Uses Firebase ANONYMOUS auth: no account, no sign-in; a silent token is
-created on first run and cached in your user folder.
+No setup: the group's Firebase project is built in, so the exe works
+on its own. (A firebase_config.json next to it overrides the defaults,
+e.g. for a fork running its own project.) Uses Firebase ANONYMOUS
+auth: no account, no sign-in; a silent token is created on first run
+and cached in your user folder.
 
 Standard library only, same as the main app.
 """
@@ -46,6 +47,16 @@ AUTH_CACHE = Path.home() / ".lsm_companion_auth.json"
 POLL_SECONDS = 3
 MAX_SUGGESTIONS = 12
 APP_TITLE = "LoLSkinMatcher Companion"
+
+# The group's Firebase project, baked in so the exe works on its own.
+# These values are PUBLIC by design (the web page ships them to every
+# visitor); security lives in the Firestore rules. A firebase_config.json
+# next to the exe/script overrides them (e.g. for a fork's own project).
+DEFAULT_CONFIG = {
+    "apiKey": "AIzaSyBbawpCeLpf3lvLyfxwHDEtNE3_eNAq6jA",
+    "projectId": "lolskinmatcher",
+    "webUrl": "https://lolskinmatcher.web.app",
+}
 
 
 class CompanionError(RuntimeError):
@@ -92,16 +103,18 @@ def s(value):  # Firestore string field
 
 
 def load_config():
+    """Built-in group config, overridable by a firebase_config.json."""
+    cfg = dict(DEFAULT_CONFIG)
     path = _config_path()
-    if not path.is_file():
-        raise CompanionError(
-            "Missing firebase_config.json — copy "
-            "firebase_config.example.json next to the agent and fill in "
-            "the group's apiKey and projectId.")
-    cfg = json.loads(path.read_text(encoding="utf-8"))
+    if path.is_file():
+        try:
+            override = json.loads(path.read_text(encoding="utf-8"))
+            cfg.update({k: v for k, v in override.items() if v})
+        except Exception as exc:
+            raise CompanionError(
+                f"{path.name} exists but couldn't be read: {exc}")
     if not cfg.get("apiKey") or not cfg.get("projectId"):
-        raise CompanionError("firebase_config.json needs both apiKey and "
-                         "projectId.")
+        raise CompanionError("Config needs both apiKey and projectId.")
     return cfg
 
 
