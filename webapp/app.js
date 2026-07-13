@@ -2,6 +2,10 @@
    ?party=<captain puuid>  -> live Firestore subscription
    ?demo=1                 -> canned data, no Firebase needed */
 
+/* Web app version — bump on every web change (shown in the footer),
+   mirroring the companion's COMPANION_VERSION. */
+const WEB_VERSION = "1.0";
+
 const ICON = (id) =>
   `https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/` +
   `global/default/v1/champion-icons/${id}.png`;
@@ -471,6 +475,7 @@ const DEMO_ARAM = {
 /* ---------------- boot ---------------- */
 
 const params = new URLSearchParams(location.search);
+$("#webver").textContent = `web v${WEB_VERSION}`;
 
 async function loadArt() {
   try {
