@@ -50,7 +50,7 @@ POLL_SECONDS = 3
 # so if a very large group would overflow it we trim the lowest-priority
 # cards rather than let the write be rejected and stall the page.
 STATE_BUDGET = 190000
-COMPANION_VERSION = "2.4"
+COMPANION_VERSION = "2.5"
 APP_TITLE = f"LoLSkinMatcher Companion  v{COMPANION_VERSION}"
 
 # Same-person alternate accounts. In the LOBBY only (never champ select), if
@@ -266,6 +266,47 @@ def champ_select(lcu):
         return None  # not in champ select
 
 
+# Riot's champ-select position names -> our role labels.
+POSITION_TO_ROLE = {"top": "Top", "jungle": "Jungle", "middle": "Mid",
+                    "bottom": "Bot", "utility": "Support"}
+
+
+def read_bans(cs, champ_names):
+    """Banned champion names in a champ-select session.
+
+    session.bans.myTeamBans/theirTeamBans are often empty, so also scan the
+    completed 'ban' actions (the authoritative source). Deduped, in order,
+    ignoring empty slots (championId 0/-1).
+    """
+    ban_ids = list((cs.get("bans") or {}).get("myTeamBans", [])) \
+        + list((cs.get("bans") or {}).get("theirTeamBans", []))
+    for group in cs.get("actions", []):
+        for act in group:
+            if act.get("type") == "ban" and act.get("completed"):
+                ban_ids.append(act.get("championId"))
+    out, seen = [], set()
+    for cid in ban_ids:
+        if not cid or cid <= 0 or cid in seen:
+            continue
+        seen.add(cid)
+        name = champ_names.get(cid)
+        if name:
+            out.append(name)
+    return out
+
+
+def read_role_prefs(cs, name_by_puuid):
+    """{player: [assigned role]} from champ select's myTeam.assignedPosition,
+    so the suggested comp seats people in the roles they're actually taking."""
+    prefs = {}
+    for t in cs.get("myTeam", []):
+        player = name_by_puuid.get(t.get("puuid"))
+        role = POSITION_TO_ROLE.get((t.get("assignedPosition") or "").lower())
+        if player and role:
+            prefs[player] = [role]
+    return prefs
+
+
 # --------------------------------------------------------------------------
 # Suggestions (reuses the main app's solver, minus banned/taken champs)
 # --------------------------------------------------------------------------
@@ -288,12 +329,13 @@ def _skin_index(libraries):
     return {p: {k: v[1] for k, v in d.items()} for p, d in idx.items()}
 
 
-def compute_suggestions(gd, libraries, blocked_names, pinned):
+def compute_suggestions(gd, libraries, blocked_names, pinned, role_prefs=None):
     """Skinline comps still possible for these players.
 
     blocked_names: champions removed from everyone's pools (bans + enemy
     picks). pinned: {player_name: champion} for teammates already locked
-    in — lines that can't seat their lock are dropped.
+    in — lines that can't seat their lock are dropped. role_prefs:
+    {player: [roles]} to seat people in their champ-select-assigned lanes.
 
     Only lines that yield a real comp are returned. A line is shown when
     a comp seats EVERYONE; for a full five-stack it may instead show a
@@ -325,11 +367,13 @@ def compute_suggestions(gd, libraries, blocked_names, pinned):
         # comp; anything less is dropped, not badged.
         comp = None
         if all(pools[p] for p in order):
-            comp = lsm.find_team_comp(pools, gd.champ_positions, mastery)
+            comp = lsm.find_team_comp(pools, gd.champ_positions, mastery,
+                                      role_prefs=role_prefs)
         if comp is None and total == 5:
             for sit_out in order:
                 sub = {p: pools[p] for p in order if p != sit_out}
-                comp = lsm.find_team_comp(sub, gd.champ_positions, mastery)
+                comp = lsm.find_team_comp(sub, gd.champ_positions, mastery,
+                                          role_prefs=role_prefs)
                 if comp:
                     break
         if not comp:
@@ -660,6 +704,7 @@ def watch_loop(log=print, stop=None, dry_run=False, on_link=None):
             aram = cs.get("benchEnabled") if cs else False
             blocked, enemy_picks, pinned = set(), [], {}
             bans = []
+            role_prefs = {}
             aram_results = []
             name_by_puuid = {m["puuid"]: m["name"] for m in members}
             if cs and aram:
@@ -678,10 +723,8 @@ def watch_loop(log=print, stop=None, dry_run=False, on_link=None):
                     aram_results = compute_aram(gd, libs, rolled_by_name,
                                                 bench_names)
             elif cs:
-                ban_ids = (cs.get("bans", {}).get("myTeamBans", [])
-                           + cs.get("bans", {}).get("theirTeamBans", []))
-                bans = [b for b in (gd.champ_names.get(cid)
-                                    for cid in ban_ids) if b]
+                bans = read_bans(cs, gd.champ_names)
+                role_prefs = read_role_prefs(cs, name_by_puuid)
                 enemy_ids = [t.get("championId")
                              for t in cs.get("theirTeam", [])
                              if t.get("championId")]
@@ -698,11 +741,13 @@ def watch_loop(log=print, stop=None, dry_run=False, on_link=None):
             if aram or len(libs) < 2:
                 suggestions = []
             elif cs:
-                # champ select: locked to the account in the client.
+                # champ select: locked to the account in the client, and
+                # seated in the roles people are actually taking (role_prefs).
                 # NB: don't bind a local named `s` here — it would shadow the
                 # module-level s() Firestore helper that the push() closure
                 # relies on, breaking every push in lobby phase.
-                suggestions = compute_suggestions(gd, libs, blocked, pinned)
+                suggestions = compute_suggestions(gd, libs, blocked, pinned,
+                                                  role_prefs=role_prefs)
                 for sug in suggestions:
                     sug["access"] = "current"
             else:
@@ -1079,6 +1124,47 @@ def selftest():
     fit_state(small, budget=STATE_BUDGET)
     check("fit_state leaves an in-budget state untouched",
           len(small["suggestions"]) == 3)
+
+    # bans: read from completed ban actions when the bans lists are empty
+    # (the live-game bug where picks showed but bans didn't)
+    names = {266: "Aatrox", 60: "Elise", 99: "Lux", 22: "Ashe"}
+    cs_actions = {"bans": {"myTeamBans": [], "theirTeamBans": []},
+                  "actions": [[{"type": "ban", "completed": True,
+                                "championId": 266},
+                               {"type": "ban", "completed": True,
+                                "championId": 60}],
+                              [{"type": "pick", "completed": True,
+                                "championId": 99}],
+                              [{"type": "ban", "completed": False,
+                                "championId": 22}]]}
+    check("bans read from completed ban actions (lists empty)",
+          read_bans(cs_actions, names) == ["Aatrox", "Elise"])
+    cs_lists = {"bans": {"myTeamBans": [266], "theirTeamBans": [60]},
+                "actions": []}
+    check("bans still read from the bans lists when present",
+          read_bans(cs_lists, names) == ["Aatrox", "Elise"])
+
+    # role prefs: assignedPosition -> role, and steers the comp's seating
+    cs_roles = {"myTeam": [{"puuid": "pa", "assignedPosition": "top"},
+                           {"puuid": "pb", "assignedPosition": "utility"}]}
+    rp = read_role_prefs(cs_roles, {"pa": "A", "pb": "B"})
+    check("assignedPosition maps to role prefs",
+          rp == {"A": ["Top"], "B": ["Support"]})
+    # Ekko can play Top or Mid; with A pinned to Top-pref, the comp seats
+    # Ekko top (not its mastery-default), leaving Mid for B.
+    gd_rp = lsm.GameData({1: "Firelight"}, {245: "Ekko", 1: "Annie"},
+                         {"Ekko": {"Mid", "Top"}, "Annie": {"Mid"}})
+    ra = lsm.Library("A", [{"id": 245001, "name": "s", "champion": "Ekko",
+                            "skinlines": ["Firelight"]}])
+    rb = lsm.Library("B", [{"id": 1001, "name": "s", "champion": "Annie",
+                            "skinlines": ["Firelight"]}])
+    fl = [r for r in compute_suggestions(gd_rp, [ra, rb], set(), {},
+                                         role_prefs={"A": ["Top"]})
+          if r["line"] == "Firelight"]
+    seat_a = next((s for s in fl[0]["comp"] if s["player"] == "A"), None) \
+        if fl else None
+    check("role prefs seat the player in their assigned lane",
+          seat_a and seat_a["role"] == "Top")
 
     # regression: watch_loop must NOT bind a local `s` — its nested push()
     # closure calls the module-level s() Firestore helper, and a local `s`
