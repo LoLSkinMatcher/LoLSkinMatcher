@@ -4,13 +4,23 @@
 
 /* Web app version — bump on every web change (shown in the footer),
    mirroring the companion's COMPANION_VERSION. */
-const WEB_VERSION = "1.0";
+const WEB_VERSION = "1.1";
 
 const ICON = (id) =>
   `https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/` +
   `global/default/v1/champion-icons/${id}.png`;
 
 const $ = (sel) => document.querySelector(sel);
+
+/* The Companion build the download links point at. The exe is named with
+   its version (release/LSMCompanion_v<N>.exe) so nobody has to wonder which
+   build they grabbed — bump this and rename the file together. Both the
+   header button and the landing-page button are driven from here, so the
+   version only lives in one place. */
+const COMPANION_VERSION_DL = "2.5";
+const COMPANION_DL_URL =
+  "https://github.com/LoLSkinMatcher/LoLSkinMatcher/raw/main/release/" +
+  `LSMCompanion_v${COMPANION_VERSION_DL}.exe`;
 
 function el(tag, cls, text) {
   const node = document.createElement(tag);
@@ -318,10 +328,6 @@ function render(state, keepStamp) {
     const divider = el("div", "switch-divider");
     divider.append(el("span", "switch-divider-title",
       "⚡ Playable if one player switches to their other account"));
-    divider.append(el("span", "switch-divider-note",
-      "We own these too — they just need one player to hop to another of "
-      + "their own accounts (the badge shows who → who). It's a quick, "
-      + "automated ~15s switch; everyone else stays put."));
     cards.append(divider);
     switchCards.forEach((s) => cards.append(renderCard(s)));
   }
@@ -474,6 +480,16 @@ const DEMO_ARAM = {
 
 /* ---------------- boot ---------------- */
 
+/* Keep the header download button on the version above, so a bump only
+   has to happen in one place (index.html carries a matching fallback for
+   the no-JS case). */
+(function wireHeaderDownload() {
+  const link = $("#dl-header");
+  if (!link) return;
+  link.href = COMPANION_DL_URL;
+  link.textContent = `⬇ Companion v${COMPANION_VERSION_DL} (.exe)`;
+})();
+
 const params = new URLSearchParams(location.search);
 $("#webver").textContent = `web v${WEB_VERSION}`;
 
@@ -528,9 +544,9 @@ if (params.get("demo") === "aram") {
           lobby and champ select live — bans and enemy picks update
           the comps in real time.</li>
       </ol>
-      <p class="hint"><a class="dl"
-        href="https://github.com/LoLSkinMatcher/LoLSkinMatcher/raw/main/release/LSMCompanion.exe"
-        download>⬇ Download the companion (.exe)</a></p>
+      <p class="hint"><a class="dl" href="${COMPANION_DL_URL}"
+        download>⬇ Download the Companion v${COMPANION_VERSION_DL}
+        (.exe)</a></p>
       <p class="hint">Want a preview right now? <a href="?demo=1">See
       the demo</a>.</p>
     </div>`;

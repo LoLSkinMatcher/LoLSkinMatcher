@@ -31,7 +31,7 @@ The current app is the **Companion** + web page (see
 
 ## Running it
 
-**Windows executable (no install):** run `release/LSMCompanion.exe`.
+**Windows executable (no install):** run `release/LSMCompanion_v2.5.exe`.
 Upload your library once, then the captain keeps it open to feed the
 live party page. SmartScreen may warn on an unsigned exe — "More info →
 Run anyway".
@@ -59,7 +59,7 @@ python release/league_skin_matcher.py --selftest # engine self tests
 
 ```
 python -m pip install pyinstaller
-python -m PyInstaller --onefile --windowed --icon reksai.ico --name LSMCompanion release/lsm_companion.py
+python -m PyInstaller --onefile --windowed --icon reksai.ico --name LSMCompanion_v2.5 release/lsm_companion.py
 ```
 
 ## Privacy / data
