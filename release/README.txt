@@ -3,13 +3,13 @@ LEAGUE SKIN MATCHER
 Find the skinlines (High Noon, Pool Party, Star Guardian, ...) that you
 and your friends can ALL play together — live, during champ select.
 
-Just run LSMCompanion.exe. Nothing else to install.
+Just run LSMCompanion_v2.5.exe. Nothing else to install.
 
 
-COMPANION  (LSMCompanion.exe)  — the app
+COMPANION  (LSMCompanion_v2.5.exe)  — the app
 ----------------------------------------
   1. Open the League client and log in.
-  2. Run LSMCompanion.exe and click "Upload my library".
+  2. Run LSMCompanion_v2.5.exe and click "Upload my library".
      (Re-run it whenever you buy new skins.)
   3. One person is the captain: they tick "Watch live lobby" and
      share the party link it shows.
@@ -17,7 +17,7 @@ COMPANION  (LSMCompanion.exe)  — the app
      skinlines your whole party can play — reacting to bans and enemy
      picks in draft, or the rolls + bench in ARAM.
 
-Friends need ONLY LSMCompanion.exe (the group's settings are built in).
+Friends need ONLY LSMCompanion_v2.5.exe (the group's settings are built in).
 SmartScreen may warn on any unsigned exe — More info -> Run anyway.
 
 No-setup preview of the party page:
