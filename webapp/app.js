@@ -4,7 +4,7 @@
 
 /* Web app version — bump on every web change (shown in the footer),
    mirroring the companion's COMPANION_VERSION. */
-const WEB_VERSION = "1.1";
+const WEB_VERSION = "1.2";
 
 const ICON = (id) =>
   `https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/` +
@@ -374,9 +374,9 @@ function demoGrid(players, comp, extra) {
 const DEMO = {
   phase: "lobby",
   members: [
-    { name: "Jhin Blossoms#Jhin" }, { name: "POG Fennel#68419" },
-    { name: "RubixQber#ayaya" }, { name: "aesuki#sushi" },
-    { name: "StallionPrime#9125" },
+    { name: "Mid Andy#1v9" }, { name: "Jungle Diff#GANK" },
+    { name: "Last Hit Larry#CS0" }, { name: "Ward Mom#VISION" },
+    { name: "Backdoor Barry#NEXUS" },
   ],
   missing: [],
   pinned: {},
@@ -389,61 +389,61 @@ const DEMO_PLAYERS = DEMO.members;
 DEMO.suggestions = [
   (() => {
     const comp = [
-      { role: "Top", player: "StallionPrime#9125", champ: "Diana", champId: 131, skin: "Blood Moon Diana" },
-      { role: "Jungle", player: "POG Fennel#68419", champ: "Talon", champId: 91, skin: "Blood Moon Talon" },
-      { role: "Mid", player: "Jhin Blossoms#Jhin", champ: "Twisted Fate", champId: 4, skin: "Blood Moon Twisted Fate" },
-      { role: "Bot", player: "RubixQber#ayaya", champ: "Sivir", champId: 15, skin: "Blood Moon Sivir" },
-      { role: "Support", player: "aesuki#sushi", champ: "Elise", champId: 60, skin: "Blood Moon Elise" },
+      { role: "Top", player: "Backdoor Barry#NEXUS", champ: "Diana", champId: 131, skin: "Blood Moon Diana" },
+      { role: "Jungle", player: "Jungle Diff#GANK", champ: "Talon", champId: 91, skin: "Blood Moon Talon" },
+      { role: "Mid", player: "Mid Andy#1v9", champ: "Twisted Fate", champId: 4, skin: "Blood Moon Twisted Fate" },
+      { role: "Bot", player: "Last Hit Larry#CS0", champ: "Sivir", champId: 15, skin: "Blood Moon Sivir" },
+      { role: "Support", player: "Ward Mom#VISION", champ: "Elise", champId: 60, skin: "Blood Moon Elise" },
     ];
     return {
       line: "Blood Moon", emoji: "👹", color: "#922b21", ok: true,
       access: "current", comp,
       grid: demoGrid(DEMO_PLAYERS, comp, {
-        "StallionPrime#9125": [{ role: "Mid", champ: "Diana", champId: 131 },
+        "Backdoor Barry#NEXUS": [{ role: "Mid", champ: "Diana", champId: 131 },
                                { role: "Jungle", champ: "Rek'Sai", champId: 421 }],
-        "Jhin Blossoms#Jhin": [{ role: "Support", champ: "Pyke", champId: 555 }],
-        "RubixQber#ayaya": [{ role: "Bot", champ: "Kalista", champId: 429 }],
-        "aesuki#sushi": [{ role: "Support", champ: "Thresh", champId: 412 },
+        "Mid Andy#1v9": [{ role: "Support", champ: "Pyke", champId: 555 }],
+        "Last Hit Larry#CS0": [{ role: "Bot", champ: "Kalista", champId: 429 }],
+        "Ward Mom#VISION": [{ role: "Support", champ: "Thresh", champId: 412 },
                          { role: "Mid", champ: "Zilean", champId: 26 }],
       }),
     };
   })(),
   (() => {
     const comp = [
-      { role: "Top", player: "RubixQber#ayaya", champ: "Sion", champId: 14, skin: "High Noon Sion" },
-      { role: "Jungle", player: "StallionPrime#9125", champ: "Rek'Sai", champId: 421, skin: "High Noon Rek'Sai" },
-      { role: "Mid", player: "Jhin Blossoms#Jhin", champ: "Lucian", champId: 236, skin: "High Noon Lucian" },
-      { role: "Bot", player: "aesuki#sushi", champ: "Ashe", champId: 22, skin: "High Noon Ashe" },
-      { role: "Support", player: "POG Fennel#68419", champ: "Leona", champId: 89, skin: "High Noon Leona" },
+      { role: "Top", player: "Last Hit Larry#CS0", champ: "Sion", champId: 14, skin: "High Noon Sion" },
+      { role: "Jungle", player: "Backdoor Barry#NEXUS", champ: "Rek'Sai", champId: 421, skin: "High Noon Rek'Sai" },
+      { role: "Mid", player: "Mid Andy#1v9", champ: "Lucian", champId: 236, skin: "High Noon Lucian" },
+      { role: "Bot", player: "Ward Mom#VISION", champ: "Ashe", champId: 22, skin: "High Noon Ashe" },
+      { role: "Support", player: "Jungle Diff#GANK", champ: "Leona", champId: 89, skin: "High Noon Leona" },
     ];
     return {
       line: "High Noon", emoji: "🤠", color: "#e07b1f", ok: true,
       access: "current", comp,
       grid: demoGrid(DEMO_PLAYERS, comp, {
-        "StallionPrime#9125": [{ role: "Top", champ: "Rek'Sai", champId: 421 }],
-        "Jhin Blossoms#Jhin": [{ role: "Bot", champ: "Lucian", champId: 236 }],
-        "RubixQber#ayaya": [{ role: "Support", champ: "Thresh", champId: 412 }],
+        "Backdoor Barry#NEXUS": [{ role: "Top", champ: "Rek'Sai", champId: 421 }],
+        "Mid Andy#1v9": [{ role: "Bot", champ: "Lucian", champId: 236 }],
+        "Last Hit Larry#CS0": [{ role: "Support", champ: "Thresh", champId: 412 }],
       }),
     };
   })(),
   (() => {
-    // a "switch" card: StallionPrime is in the lobby, but this line only
+    // a "switch" card: Backdoor Barry is in the lobby, but this line only
     // works if they hop to Mike Oxmaul — so that row is shown as Mike.
     const players = DEMO_PLAYERS.map((p) =>
-      p.name === "StallionPrime#9125" ? { name: "Mike Oxmaul#NA5" } : p);
+      p.name === "Backdoor Barry#NEXUS" ? { name: "Mike Oxmaul#NA5" } : p);
     const comp = [
-      { role: "Top", player: "RubixQber#ayaya", champ: "Gragas", champId: 79, skin: "Pool Party Gragas" },
+      { role: "Top", player: "Last Hit Larry#CS0", champ: "Gragas", champId: 79, skin: "Pool Party Gragas" },
       { role: "Jungle", player: "Mike Oxmaul#NA5", champ: "Rek'Sai", champId: 421, skin: "Pool Party Rek'Sai" },
-      { role: "Mid", player: "Jhin Blossoms#Jhin", champ: "Fizz", champId: 105, skin: "Pool Party Fizz" },
-      { role: "Bot", player: "POG Fennel#68419", champ: "Miss Fortune", champId: 21, skin: "Pool Party Miss Fortune" },
+      { role: "Mid", player: "Mid Andy#1v9", champ: "Fizz", champId: 105, skin: "Pool Party Fizz" },
+      { role: "Bot", player: "Jungle Diff#GANK", champ: "Miss Fortune", champId: 21, skin: "Pool Party Miss Fortune" },
     ];
     return {
       line: "Pool Party", emoji: "🏖", color: "#1fc3c3", ok: true,
-      access: "switch", switchFrom: "StallionPrime#9125",
+      access: "switch", switchFrom: "Backdoor Barry#NEXUS",
       switchTo: "Mike Oxmaul#NA5", comp,
       grid: demoGrid(players, comp, {
         "Mike Oxmaul#NA5": [{ role: "Support", champ: "Taric", champId: 44 }],
-        "POG Fennel#68419": [{ role: "Support", champ: "Zac", champId: 154 }],
+        "Jungle Diff#GANK": [{ role: "Support", champ: "Zac", champId: 154 }],
       }),
     };
   })(),
@@ -453,8 +453,8 @@ const DEMO_ARAM = {
   phase: "champ select",
   aramMode: true,
   members: [
-    { name: "Mike Oxmaul#NA5" }, { name: "StallionPrime#9125" },
-    { name: "aesuki#sushi" },
+    { name: "Mike Oxmaul#NA5" }, { name: "Backdoor Barry#NEXUS" },
+    { name: "Ward Mom#VISION" },
   ],
   missing: [],
   aram: [
@@ -463,8 +463,8 @@ const DEMO_ARAM = {
       count: 3, total: 3, full: true,
       assignment: [
         { player: "Mike Oxmaul#NA5", champ: "Lux", champId: 99, source: "rolled" },
-        { player: "StallionPrime#9125", champ: "Jinx", champId: 222, source: "bench" },
-        { player: "aesuki#sushi", champ: "Soraka", champId: 16, source: "rolled" },
+        { player: "Backdoor Barry#NEXUS", champ: "Jinx", champId: 222, source: "bench" },
+        { player: "Ward Mom#VISION", champ: "Soraka", champId: 16, source: "rolled" },
       ],
     },
     {
@@ -472,7 +472,7 @@ const DEMO_ARAM = {
       count: 2, total: 3, full: false,
       assignment: [
         { player: "Mike Oxmaul#NA5", champ: "Miss Fortune", champId: 21, source: "bench" },
-        { player: "StallionPrime#9125", champ: "Draven", champId: 119, source: "rolled" },
+        { player: "Backdoor Barry#NEXUS", champ: "Draven", champId: 119, source: "rolled" },
       ],
     },
   ],
